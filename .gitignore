@@ -1,0 +1,15 @@
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.coverage
+htmlcov/
+.env
+.venv/
+dist/
+build/
+.mini-code-memory/
+.mini-code-session-memory/
+.minicode-lite-memory/
+.temp/
+

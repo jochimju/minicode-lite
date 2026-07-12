@@ -1,0 +1,8 @@
+name: minicode-lite
+channels:
+  - defaults
+dependencies:
+  - python=3.11
+  - pytest
+  - pip
+
