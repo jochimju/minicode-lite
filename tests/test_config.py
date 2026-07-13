@@ -132,6 +132,22 @@ def test_incomplete_runtime_config_reports_missing_variables_and_keeps_mock_read
     assert "CUSTOM_API_BASE_URL" not in config.diagnostic
 
 
+@pytest.mark.parametrize("blank_name", CONFIG_ENV_NAMES)
+def test_whitespace_only_runtime_values_are_reported_as_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, blank_name: str
+) -> None:
+    monkeypatch.setenv("MINI_CODE_MODEL", "qwen3.7-max")
+    monkeypatch.setenv("CUSTOM_API_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    monkeypatch.setenv("CUSTOM_API_KEY", "configured-key")
+    monkeypatch.setenv(blank_name, "   ")
+
+    config = load_runtime_config(dotenv_path=tmp_path / "missing.env")
+
+    assert config.is_qwen_configured is False
+    assert blank_name in config.diagnostic
+    assert all(name not in config.diagnostic for name in CONFIG_ENV_NAMES if name != blank_name)
+
+
 @pytest.mark.parametrize("settings_content", ["{", "[]"])
 def test_load_runtime_config_rejects_invalid_json_settings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, settings_content: str

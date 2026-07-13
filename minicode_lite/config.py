@@ -93,16 +93,20 @@ def _load_settings_values(path: Path | None) -> dict[str, str]:
 def _value_by_precedence(
     *, environment_name: str, logical_name: str, dotenv_values: dict[str, str], settings_values: dict[str, str]
 ) -> str:
-    """按照环境变量、.env、JSON 的顺序取得一个字段，并保留高优先级来源的空值。"""
+    """按照环境变量、.env、JSON 的顺序取得一个字段，并把纯空白统一视为未配置。"""
 
     # “存在”与“非空”分开处理，使用户可以用空环境变量或空 .env 值显式保持 mock 模式。
     if environment_name in os.environ:
-        return os.environ[environment_name]
-    # .env 中存在同名键时优先于 JSON，即使其值为空也符合来源优先级约定。
-    if environment_name in dotenv_values:
-        return dotenv_values[environment_name]
-    # JSON 使用对外暴露的逻辑键，因此在最后一步按 logical_name 查询。
-    return settings_values.get(logical_name, "")
+        # 环境变量优先级最高；先取原始值，统一在分支结束后清理空白。
+        value = os.environ[environment_name]
+    elif environment_name in dotenv_values:
+        # .env 中存在同名键时优先于 JSON，即使其值为空也符合来源优先级约定。
+        value = dotenv_values[environment_name]
+    else:
+        # JSON 使用对外暴露的逻辑键，因此只在前两个来源都缺少该字段时查询它。
+        value = settings_values.get(logical_name, "")
+    # 所有来源在同一边界去除首尾空白，确保空白字符串不会绕过完整性检查或误导诊断。
+    return value.strip()
 
 
 def _configuration_diagnostic(config: RuntimeConfig) -> str:
