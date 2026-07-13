@@ -416,6 +416,12 @@ minicode-lite/
 - 标签：`stage-06`
 - 推送 GitHub/Gitee。
 
+### 完成状态（已完成）
+
+阶段 06 的实现、离线测试、opt-in live Qwen 测试和学习总结已补齐。2026-07-13 的本次全量测试结果为 `71 passed, 1 skipped`；通过临时设置 `MINICODE_LITE_LIVE_QWEN_TEST=1` 运行的 live marker 测试为 `1 passed`，已完成真实 DashScope endpoint 连通性验证。
+
+- 学习总结：[stage-06-prompt-config-qwen-model-adapter.md](docs/stage-summaries/stage-06-prompt-config-qwen-model-adapter.md)
+
 ## 阶段 7：权限管理和命令执行
 
 目标：实现最小可用的权限 harness，避免 agent 任意执行危险操作。

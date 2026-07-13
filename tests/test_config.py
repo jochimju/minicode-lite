@@ -9,7 +9,15 @@ import pytest
 from minicode_lite.config import RuntimeConfig, load_runtime_config
 
 
-CONFIG_ENV_NAMES = ("MINI_CODE_MODEL", "CUSTOM_API_BASE_URL", "CUSTOM_API_KEY")
+MODEL_CONFIGURATION_ENV_NAMES = (
+    "MINI_CODE_MODEL",
+    "CUSTOM_API_BASE_URL",
+    "CUSTOM_API_KEY",
+)
+CONFIG_ENV_NAMES = (
+    *MODEL_CONFIGURATION_ENV_NAMES,
+    "MINICODE_LITE_LIVE_QWEN_TEST",
+)
 
 
 def _clear_runtime_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -96,6 +104,7 @@ def test_load_runtime_config_uses_json_settings_when_higher_sources_are_missing(
                 "model": "settings-model",
                 "base_url": "https://settings.example/v1/",
                 "api_key": "settings-key",
+                "live_qwen_test_enabled": "1",
             }
         ),
         encoding="utf-8",
@@ -110,6 +119,33 @@ def test_load_runtime_config_uses_json_settings_when_higher_sources_are_missing(
     assert config.base_url == "https://settings.example/v1"
     assert config.api_key == "settings-key"
     assert config.is_qwen_configured is True
+    assert config.live_qwen_test_enabled is True
+
+
+def test_load_runtime_config_enables_live_qwen_test_from_dotenv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_runtime_environment(monkeypatch)
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("MINICODE_LITE_LIVE_QWEN_TEST= 1 \n", encoding="utf-8")
+
+    config = load_runtime_config(dotenv_path=dotenv_path)
+
+    assert config.live_qwen_test_enabled is True
+    assert "MINICODE_LITE_LIVE_QWEN_TEST" not in os.environ
+
+
+def test_process_environment_overrides_dotenv_for_live_qwen_test_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_runtime_environment(monkeypatch)
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("MINICODE_LITE_LIVE_QWEN_TEST=1\n", encoding="utf-8")
+    monkeypatch.setenv("MINICODE_LITE_LIVE_QWEN_TEST", "0")
+
+    config = load_runtime_config(dotenv_path=dotenv_path)
+
+    assert config.live_qwen_test_enabled is False
 
 
 def test_incomplete_runtime_config_reports_missing_variables_and_keeps_mock_ready(
@@ -132,7 +168,7 @@ def test_incomplete_runtime_config_reports_missing_variables_and_keeps_mock_read
     assert "CUSTOM_API_BASE_URL" not in config.diagnostic
 
 
-@pytest.mark.parametrize("blank_name", CONFIG_ENV_NAMES)
+@pytest.mark.parametrize("blank_name", MODEL_CONFIGURATION_ENV_NAMES)
 def test_whitespace_only_runtime_values_are_reported_as_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, blank_name: str
 ) -> None:

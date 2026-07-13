@@ -11,6 +11,16 @@ import pytest
 from minicode_lite.main import run
 
 
+@pytest.fixture(autouse=True)
+def _force_mock_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """让 CLI 离线测试不受开发者本机真实模型配置影响。"""
+
+    # 测试目标是 Stage 5 的 mock CLI 行为，置空高优先级字段可阻止 .env 触发网络调用。
+    monkeypatch.setenv("MINI_CODE_MODEL", "")
+    monkeypatch.setenv("CUSTOM_API_BASE_URL", "")
+    monkeypatch.setenv("CUSTOM_API_KEY", "")
+
+
 def test_cli_prompt_runs_headless_turn(tmp_path: Path) -> None:
     stdout = io.StringIO()
 

@@ -12,6 +12,16 @@ from minicode_lite.prompt import build_system_prompt
 from minicode_lite.types import AgentStep
 
 
+@pytest.fixture(autouse=True)
+def _force_mock_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """隔离本机 .env，确保 headless 单元测试始终覆盖 mock 契约。"""
+
+    # 环境变量优先级最高；显式置空可覆盖本机真实凭据，防止离线测试意外触网。
+    monkeypatch.setenv("MINI_CODE_MODEL", "")
+    monkeypatch.setenv("CUSTOM_API_BASE_URL", "")
+    monkeypatch.setenv("CUSTOM_API_KEY", "")
+
+
 def test_run_headless_rejects_empty_prompt(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="empty prompt"):
         run_headless("", cwd=tmp_path)

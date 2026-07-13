@@ -13,6 +13,7 @@ _ENVIRONMENT_KEYS = {
     "model": "MINI_CODE_MODEL",
     "base_url": "CUSTOM_API_BASE_URL",
     "api_key": "CUSTOM_API_KEY",
+    "live_qwen_test_enabled": "MINICODE_LITE_LIVE_QWEN_TEST",
 }
 
 
@@ -28,6 +29,8 @@ class RuntimeConfig:
     api_key: str
     # diagnostic 说明当前是否可启用真实模型，供 CLI 或 headless 层决定是否提示用户。
     diagnostic: str
+    # 该开关只决定是否运行需要访问外部网络的活体测试，默认关闭以保持旧的手工 RuntimeConfig 构造方式仍然有效。
+    live_qwen_test_enabled: bool = False
 
     @property
     def is_qwen_configured(self) -> bool:
@@ -119,7 +122,9 @@ def _configuration_diagnostic(config: RuntimeConfig) -> str:
     # 逐项检查实际值，将缺失原因映射回用户需要设置的环境变量名称。
     missing = [
         environment_name
+        # 活体测试开关不是模型运行时的必填项，因此诊断仍只检查三项真实 provider 凭据。
         for logical_name, environment_name in _ENVIRONMENT_KEYS.items()
+        if logical_name != "live_qwen_test_enabled"
         if not getattr(config, logical_name)
     ]
     # 只列出变量名而非变量值，让诊断既能指导配置又不会泄露 API key。
@@ -155,6 +160,16 @@ def load_runtime_config(
         dotenv_values=dotenv_values,
         settings_values=settings_values,
     )
+    # 先复用与其他字段完全相同的来源优先级，再将规范化后的精确 "1" 解析为真；其他任何值都保持活体测试关闭。
+    live_qwen_test_enabled = (
+        _value_by_precedence(
+            environment_name=_ENVIRONMENT_KEYS["live_qwen_test_enabled"],
+            logical_name="live_qwen_test_enabled",
+            dotenv_values=dotenv_values,
+            settings_values=settings_values,
+        )
+        == "1"
+    )
     # 先构造无诊断的不可变配置，以便复用同一套完整性判定生成诊断文本。
     provisional_config = RuntimeConfig(model=model, base_url=base_url, api_key=api_key, diagnostic="")
     # 返回最终对象时将诊断固化，调用方无需再次读取文件或接触密钥即可知道是否可启用真实模型。
@@ -163,4 +178,5 @@ def load_runtime_config(
         base_url=base_url,
         api_key=api_key,
         diagnostic=_configuration_diagnostic(provisional_config),
+        live_qwen_test_enabled=live_qwen_test_enabled,
     )
