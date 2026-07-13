@@ -98,8 +98,12 @@ def run(argv: list[str] | None = None, stdout: TextIO | None = None, stderr: Tex
     try:
         # 成功路径只打印最终文本，保持 headless 输出适合脚本消费。
         print(run_headless(prompt), file=out)
-    except (ValueError, RuntimeError) as error:
-        # 参数校验和 provider 都已将可展示问题收敛为这两类异常；在 CLI 边界转成单行文本，避免向脚本用户暴露 traceback。
+    except RuntimeError:
+        # provider 异常文本可能含有请求头或响应正文；统一替换为固定提示，防止认证信息进入终端或 CI 日志。
+        print("Error: model provider request failed", file=err)
+        return 1
+    except ValueError as error:
+        # 参数校验错误不携带 provider 敏感信息，保留具体内容可帮助用户修正命令行输入。
         print(f"Error: {error}", file=err)
         return 1
     return 0

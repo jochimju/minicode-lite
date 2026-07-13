@@ -77,7 +77,7 @@ def test_run_headless_handles_local_command_before_loading_config_or_model(
 
 def test_headless_cli_reports_runtime_error_without_traceback(monkeypatch: pytest.MonkeyPatch) -> None:
     def fail_provider(_prompt: str) -> str:
-        raise RuntimeError("Qwen-compatible request failed with HTTP status 401.")
+        raise RuntimeError("Bearer stage6-secret-token")
 
     monkeypatch.setattr("minicode_lite.headless.run_headless", fail_provider)
     stdout = io.StringIO()
@@ -87,7 +87,8 @@ def test_headless_cli_reports_runtime_error_without_traceback(monkeypatch: pytes
 
     assert exit_code == 1
     assert stdout.getvalue() == ""
-    assert stderr.getvalue() == "Error: Qwen-compatible request failed with HTTP status 401.\n"
+    assert stderr.getvalue() == "Error: model provider request failed\n"
+    assert "stage6-secret-token" not in stderr.getvalue()
     assert "Traceback" not in stderr.getvalue()
 
 

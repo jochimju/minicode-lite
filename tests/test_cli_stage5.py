@@ -61,7 +61,7 @@ def test_module_cli_accepts_prompt(tmp_path: Path) -> None:
 def test_cli_reports_runtime_error_without_traceback(monkeypatch: pytest.MonkeyPatch) -> None:
     def fail_provider(_prompt: str, *, cwd: str | Path | None = None) -> str:
         del cwd
-        raise RuntimeError("Qwen-compatible request failed due to a network error.")
+        raise RuntimeError("Bearer stage6-secret-token")
 
     monkeypatch.setattr("minicode_lite.main.run_headless", fail_provider)
     stdout = io.StringIO()
@@ -71,7 +71,8 @@ def test_cli_reports_runtime_error_without_traceback(monkeypatch: pytest.MonkeyP
 
     assert exit_code == 1
     assert stdout.getvalue() == ""
-    assert stderr.getvalue() == "Error: Qwen-compatible request failed due to a network error.\n"
+    assert stderr.getvalue() == "Error: model provider request failed\n"
+    assert "stage6-secret-token" not in stderr.getvalue()
     assert "Traceback" not in stderr.getvalue()
 
 

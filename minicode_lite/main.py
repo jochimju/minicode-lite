@@ -73,8 +73,12 @@ def run(
         try:
             # 有任务时复用 headless 实现，避免 CLI 和单轮执行逻辑分叉。
             print(run_headless(prompt, cwd=cwd), file=output)
-        except (ValueError, RuntimeError) as error:
-            # 复用 headless 的安全错误契约：已收敛的 provider 异常只写入注入的 stderr，避免命令行泄露调用栈。
+        except RuntimeError:
+            # provider 失败的异常文本不可信；使用固定消息确保 API key 不会被打印到 stderr。
+            print("Error: model provider request failed", file=error_output)
+            return 1
+        except ValueError as error:
+            # 用户输入校验错误可安全展示，方便命令行调用者定位自身参数问题。
             print(f"Error: {error}", file=error_output)
             return 1
         return 0
