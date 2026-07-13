@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 定义在工作区内创建或覆盖 UTF-8 文本文件的写入工具。
+
 from typing import Any
 
 from minicode_lite.tooling import ToolContext, ToolDefinition, ToolResult
@@ -7,8 +9,11 @@ from minicode_lite.tools._shared import resolve_for_tool, write_text_file
 
 
 def _validate(input_data: Any) -> dict[str, str]:
+    """验证写入操作同时拥有目标路径和文本内容。"""
+
     if not isinstance(input_data, dict):
         raise ValueError("input must be an object")
+    # 路径和内容分别取出后独立校验，错误信息更利于模型修正调用。
     path = input_data.get("path")
     content = input_data.get("content")
     if not isinstance(path, str) or not path:
@@ -19,13 +24,18 @@ def _validate(input_data: Any) -> dict[str, str]:
 
 
 def _run(input_data: dict[str, str], context: ToolContext) -> ToolResult:
+    """确认写入路径可访问后，委托共享函数创建目录并写入文本。"""
+
+    # write 模式让未来权限层能对有副作用操作采用更严格策略。
     target, error = resolve_for_tool(context, input_data["path"], "write")
     if error is not None:
         return error
+    # 无权限错误即代表已获得可用规范化路径。
     assert target is not None
     return write_text_file(target, input_data["path"], input_data["content"])
 
 
+# 注册定义同时供 agent loop 和 `/tools` 命令使用。
 write_file_tool = ToolDefinition(
     name="write_file",
     description="Write a UTF-8 text file relative to the workspace root.",
