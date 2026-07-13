@@ -73,7 +73,8 @@ def run(
         try:
             # 有任务时复用 headless 实现，避免 CLI 和单轮执行逻辑分叉。
             print(run_headless(prompt, cwd=cwd), file=output)
-        except ValueError as error:
+        except (ValueError, RuntimeError) as error:
+            # 复用 headless 的安全错误契约：已收敛的 provider 异常只写入注入的 stderr，避免命令行泄露调用栈。
             print(f"Error: {error}", file=error_output)
             return 1
         return 0

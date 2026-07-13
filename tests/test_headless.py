@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 import pytest
 
 from minicode_lite.config import RuntimeConfig
-from minicode_lite.headless import run_headless
+from minicode_lite.headless import run, run_headless
 from minicode_lite.mock_model import ScriptedModel
 from minicode_lite.prompt import build_system_prompt
 from minicode_lite.types import AgentStep
@@ -72,3 +73,32 @@ def test_run_headless_handles_local_command_before_loading_config_or_model(
     response = run_headless("/tools", cwd=tmp_path)
 
     assert "read_file" in response
+
+
+def test_headless_cli_reports_runtime_error_without_traceback(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_provider(_prompt: str) -> str:
+        raise RuntimeError("Qwen-compatible request failed with HTTP status 401.")
+
+    monkeypatch.setattr("minicode_lite.headless.run_headless", fail_provider)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = run(["hello"], stdout=stdout, stderr=stderr)
+
+    assert exit_code == 1
+    assert stdout.getvalue() == ""
+    assert stderr.getvalue() == "Error: Qwen-compatible request failed with HTTP status 401.\n"
+    assert "Traceback" not in stderr.getvalue()
+
+
+def test_headless_cli_preserves_value_error_handling(monkeypatch: pytest.MonkeyPatch) -> None:
+    def reject_prompt(_prompt: str) -> str:
+        raise ValueError("empty prompt")
+
+    monkeypatch.setattr("minicode_lite.headless.run_headless", reject_prompt)
+    stderr = io.StringIO()
+
+    exit_code = run(["hello"], stderr=stderr)
+
+    assert exit_code == 1
+    assert stderr.getvalue() == "Error: empty prompt\n"

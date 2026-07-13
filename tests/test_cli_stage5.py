@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from minicode_lite.main import run
 
 
@@ -54,3 +56,34 @@ def test_module_cli_accepts_prompt(tmp_path: Path) -> None:
 
     assert completed.returncode == 0
     assert completed.stdout.strip() == "MiniCode Lite mock model received your message."
+
+
+def test_cli_reports_runtime_error_without_traceback(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_provider(_prompt: str, *, cwd: str | Path | None = None) -> str:
+        del cwd
+        raise RuntimeError("Qwen-compatible request failed due to a network error.")
+
+    monkeypatch.setattr("minicode_lite.main.run_headless", fail_provider)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = run(["hello"], stdout=stdout, stderr=stderr)
+
+    assert exit_code == 1
+    assert stdout.getvalue() == ""
+    assert stderr.getvalue() == "Error: Qwen-compatible request failed due to a network error.\n"
+    assert "Traceback" not in stderr.getvalue()
+
+
+def test_cli_preserves_value_error_handling(monkeypatch: pytest.MonkeyPatch) -> None:
+    def reject_prompt(_prompt: str, *, cwd: str | Path | None = None) -> str:
+        del cwd
+        raise ValueError("empty prompt")
+
+    monkeypatch.setattr("minicode_lite.main.run_headless", reject_prompt)
+    stderr = io.StringIO()
+
+    exit_code = run(["hello"], stderr=stderr)
+
+    assert exit_code == 1
+    assert stderr.getvalue() == "Error: empty prompt\n"
