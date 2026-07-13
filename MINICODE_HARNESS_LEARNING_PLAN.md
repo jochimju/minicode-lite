@@ -122,6 +122,10 @@ minicode-lite/
     __init__.py
     types.py
     mock_model.py
+    config.py
+    prompt.py
+    model_registry.py
+    qwen_adapter.py
     tooling.py
     agent_loop.py
     turn_kernel.py
@@ -367,7 +371,52 @@ minicode-lite/
 - 标签：`stage-05`
 - 推送 GitHub/Gitee。
 
-## 阶段 6：权限管理和命令执行
+## 阶段 6：prompt、配置和模型注册
+
+目标：把 mock harness 升级成可配置 runtime，提前接入真实 Qwen/OpenAI-compatible 模型，但仍保持 mock 为默认安全后备。
+
+### 先跑通最小闭环
+
+- 实现 `config.py`：
+  - 从环境变量读取模型名、API key、base URL。
+  - 支持一个本地 settings JSON。
+  - 缺配置时返回 mock runtime 或明确诊断。
+- 实现 `prompt.py`：
+  - 构建 system prompt。
+  - 注入 cwd、工具列表、权限摘要占位、memory 占位。
+- 实现 `model_registry.py`：
+  - `create_model_adapter`
+  - 默认返回 `MockModelAdapter`。
+  - 配置完整时返回真实模型 adapter。
+- 实现最小 Qwen/OpenAI-compatible adapter：
+  - 支持阿里云百炼/DashScope OpenAI 兼容接口。
+  - 先跑通普通 chat completion。
+  - tool calling 只做本项目当前工具协议需要的最小映射。
+
+### 对照真实模块理解
+
+- 对照 `minicode/config.py`，理解配置优先级。
+- 对照 `minicode/prompt.py`，理解系统提示由静态规则和动态运行时信息组成。
+- 对照 `minicode/model_registry.py`，理解 provider 适配和 fallback 的边界。
+- 对照真实 provider adapter 时，只学习“本项目消息格式如何映射到 provider API”，暂不复制 streaming 和复杂 fallback 链。
+
+### 写测试验证
+
+- 环境变量优先级。
+- settings 文件可加载。
+- 缺配置时不崩溃，并回退到 mock。
+- prompt 包含 cwd、工具名、权限摘要占位。
+- `create_model_adapter` 默认可返回 mock。
+- 配置 Qwen/DashScope 时能构造真实 adapter。
+- 用 fake HTTP/client 验证 adapter 会发送正确的 model、messages 和 tools 结构。
+
+### Git 上传
+
+- 提交信息：`stage-06: add prompt config and qwen model adapter`
+- 标签：`stage-06`
+- 推送 GitHub/Gitee。
+
+## 阶段 7：权限管理和命令执行
 
 目标：实现最小可用的权限 harness，避免 agent 任意执行危险操作。
 
@@ -408,11 +457,11 @@ minicode-lite/
 
 ### Git 上传
 
-- 提交信息：`stage-06: add permissions and command tool`
-- 标签：`stage-06`
+- 提交信息：`stage-07: add permissions and command tool`
+- 标签：`stage-07`
 - 推送 GitHub/Gitee。
 
-## 阶段 7：session 持久化和 replay
+## 阶段 8：session 持久化和 replay
 
 目标：让一次 agent turn 不再只是内存里的临时过程，而是可检查、可回放的运行记录。
 
@@ -447,11 +496,11 @@ minicode-lite/
 
 ### Git 上传
 
-- 提交信息：`stage-07: add durable sessions and replay`
-- 标签：`stage-07`
+- 提交信息：`stage-08: add durable sessions and replay`
+- 标签：`stage-08`
 - 推送 GitHub/Gitee。
 
-## 阶段 8：checkpoint 和 rewind
+## 阶段 9：checkpoint 和 rewind
 
 目标：理解 MiniCode 的恢复优先设计：文件修改前先留快照，出错后能预览和回退。
 
@@ -481,44 +530,7 @@ minicode-lite/
 
 ### Git 上传
 
-- 提交信息：`stage-08: add checkpoints and rewind`
-- 标签：`stage-08`
-- 推送 GitHub/Gitee。
-
-## 阶段 9：prompt、配置和模型注册
-
-目标：把 mock harness 升级成可配置 runtime，但仍保持 mock 为默认安全后备。
-
-### 先跑通最小闭环
-
-- 实现 `config.py`：
-  - 从环境变量读取模型名。
-  - 支持一个本地 settings JSON。
-  - 缺配置时返回 mock runtime 或明确诊断。
-- 实现 `prompt.py`：
-  - 构建 system prompt。
-  - 注入 cwd、权限摘要、工具列表、memory 占位。
-- 实现 `model_registry.py`：
-  - `create_model_adapter`
-  - 默认返回 `MockModelAdapter`。
-
-### 对照真实模块理解
-
-- 对照 `minicode/config.py`，理解配置优先级。
-- 对照 `minicode/prompt.py`，理解系统提示由静态规则和动态运行时信息组成。
-- 对照 `minicode/model_registry.py`，理解 provider 适配和 fallback 的边界。
-
-### 写测试验证
-
-- 环境变量优先级。
-- settings 文件可加载。
-- 缺配置时不崩溃。
-- prompt 包含 cwd、工具名、权限摘要。
-- `create_model_adapter` 默认可返回 mock。
-
-### Git 上传
-
-- 提交信息：`stage-09: add prompt config and model registry`
+- 提交信息：`stage-09: add checkpoints and rewind`
 - 标签：`stage-09`
 - 推送 GitHub/Gitee。
 
@@ -832,10 +844,10 @@ minicode-lite/
 | 3 | agent loop | model -> tool -> model | `agent_loop.py`, `turn_kernel.py` | tool_result/final |
 | 4 | 文件工具 | read/write/edit | `workspace.py`, `tools/` | tmp_path/path guard |
 | 5 | CLI/headless | command -> answer | `main.py`, `headless.py` | subprocess/headless |
-| 6 | 权限/命令 | safe command gate | `permissions.py`, `run_command.py` | dangerous command |
-| 7 | session/replay | save -> load -> replay | `session.py` | persistence |
-| 8 | checkpoint/rewind | write -> snapshot -> restore | `session.py`, `file_review.py` | restore disk |
-| 9 | prompt/config/model registry | runtime -> model | `config.py`, `prompt.py` | env/settings |
+| 6 | prompt/config/model registry | runtime -> Qwen/mock model | `config.py`, `prompt.py`, `model_registry.py` | env/settings/fake client |
+| 7 | 权限/命令 | safe command gate | `permissions.py`, `run_command.py` | dangerous command |
+| 8 | session/replay | save -> load -> replay | `session.py` | persistence |
+| 9 | checkpoint/rewind | write -> snapshot -> restore | `session.py`, `file_review.py` | restore disk |
 | 10 | memory | add -> retrieve -> inject | `memory.py` | persistence/search |
 | 11 | 本地命令 | `/session` 等 | `cli_commands.py` | command formatting |
 | 12 | readiness/logging | report runtime state | `readiness.py` | JSON schema |

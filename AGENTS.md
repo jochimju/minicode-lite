@@ -28,6 +28,9 @@
 
 - `minicode/types.py`
 - `minicode/mock_model.py`
+- `minicode/config.py`
+- `minicode/prompt.py`
+- `minicode/model_registry.py`
 - `minicode/tooling.py`
 - `minicode/agent_loop.py`
 - `minicode/turn_kernel.py`
@@ -54,10 +57,10 @@
 | 3 | 最小 agent loop | 跑通 model -> tool -> model -> final |
 | 4 | 工作区和文件工具 | 安全读写当前项目文件 |
 | 5 | CLI 和 headless | 从命令行跑单轮任务 |
-| 6 | 权限和命令执行 | 建立路径、编辑、命令审批边界 |
-| 7 | session 和 replay | 持久化会话并可回放 |
-| 8 | checkpoint 和 rewind | 文件修改前留快照并可恢复 |
-| 9 | prompt、配置和模型注册 | 形成可配置 runtime |
+| 6 | prompt、配置和模型注册 | 提前接入真实 Qwen/OpenAI-compatible 模型，mock 仍作后备 |
+| 7 | 权限和命令执行 | 建立路径、编辑、命令审批边界 |
+| 8 | session 和 replay | 持久化会话并可回放 |
+| 9 | checkpoint 和 rewind | 文件修改前留快照并可恢复 |
 | 10 | 最小 memory | 项目记忆可写入、检索、注入 |
 | 11 | 本地产品命令 | `/session`、`/memory`、`/rewind` 等 |
 | 12 | readiness 和日志 | 输出运行时状态和诊断 |
@@ -89,6 +92,15 @@ docs/stage-summaries/stage-XX-<阶段主题>.md
 - 和真实 MiniCode-Python 的差异
 - 复习提示
 - 下一阶段衔接
+
+总结文档必须使用教学型写法，不要只写流水账。默认面向“有一点 agent 基础，但还不熟悉 MiniCode harness 工程”的学生。每份总结都要尽量包含：
+
+- 大白话讲解：先解释为什么这个阶段存在。
+- 心智模型：帮助理解这个阶段在 harness 中的位置。
+- 核心对象解释：说明每个关键类、函数、文件为什么需要。
+- 当前核心流程：用简短流程图说明数据怎么流动。
+- 常见误区：指出容易混淆的地方。
+- 自测问题：方便后续复习。
 
 可复制模板：
 
@@ -126,4 +138,4 @@ git push origin main --tags
 entry -> model adapter -> agent loop -> tool registry -> workspace/permissions -> session -> tests
 ```
 
-控制论、完整 TUI、真实 provider streaming、MCP、复杂 memory 和 release bundle 都应后置。
+折中后的推进顺序是：先保留 mock/scripted model 打牢测试闭环；完成文件工具和 CLI/headless 后，提前接入真实 Qwen/OpenAI-compatible adapter；再补权限、session、checkpoint、memory 等能力。控制论、完整 TUI、真实 provider streaming、MCP、复杂 memory 和 release bundle 都应后置。
