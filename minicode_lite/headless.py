@@ -7,8 +7,10 @@ from pathlib import Path
 from typing import TextIO
 
 from minicode_lite.agent_loop import run_agent_turn
+from minicode_lite.config import load_runtime_config
 from minicode_lite.local_commands import try_handle_local_command
-from minicode_lite.mock_model import MockModelAdapter
+from minicode_lite.model_registry import create_model_adapter
+from minicode_lite.prompt import build_system_prompt
 from minicode_lite.tools import create_default_tool_registry
 from minicode_lite.types import ChatMessage
 
@@ -44,11 +46,17 @@ def run_headless(prompt: str, *, cwd: str | Path | None = None) -> str:
     if local_result is not None:
         return local_result
 
-    # 普通 prompt 从单条 user 消息开始，让 agent loop 负责继续追加历史。
-    messages: list[ChatMessage] = [{"role": "user", "content": user_prompt}]
-    # 当前阶段选择 mock 适配器，后续真实模型注册后可在此替换构造策略。
+    # 本地命令已经提前返回；只有需要模型推理时才读取配置，避免 `/tools` 等命令依赖 provider 环境。
+    config = load_runtime_config()
+    # 注册表以完整性判断选择真实或 mock 适配器，并确保真实适配器持有本轮的同一份工具定义。
+    model, _diagnostic = create_model_adapter(config, tools)
+    # system 消息必须在用户任务之前，使模型先获得工作区、工具清单和当前能力边界。
+    messages: list[ChatMessage] = [
+        {"role": "system", "content": build_system_prompt(cwd=str(workspace), tools=tools)},
+        {"role": "user", "content": user_prompt},
+    ]
     result_messages = run_agent_turn(
-        model=MockModelAdapter(),
+        model=model,
         tools=tools,
         messages=messages,
         cwd=str(workspace),
