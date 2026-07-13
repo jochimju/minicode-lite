@@ -6,7 +6,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from minicode_lite.tooling import ToolRegistry
 from minicode_lite.types import AgentStep, ChatMessage
@@ -34,7 +34,7 @@ def _serialize_tools(tools: ToolRegistry) -> list[dict[str, Any]]:
 
 
 def _serialize_tool_call(message: ChatMessage) -> dict[str, Any]:
-    """将本地单个工具调用记录编码为 provider 侧 assistant/tool_calls 消息。"""
+    """将本地单个工具调用记录编码为 provider 侧 tool_calls 数组的一个元素。"""
 
     # ID 与名称是工具结果关联和注册表查找的稳定键，缺失时不能构造可恢复的请求。
     tool_use_id = message.get("toolUseId")
@@ -52,15 +52,9 @@ def _serialize_tool_call(message: ChatMessage) -> dict[str, Any]:
         raise RuntimeError("Cannot serialize assistant tool call arguments as JSON.") from error
 
     return {
-        "role": "assistant",
-        "content": message.get("content", ""),
-        "tool_calls": [
-            {
-                "id": tool_use_id,
-                "type": "function",
-                "function": {"name": tool_name, "arguments": arguments},
-            }
-        ],
+        "id": tool_use_id,
+        "type": "function",
+        "function": {"name": tool_name, "arguments": arguments},
     }
 
 
@@ -83,24 +77,64 @@ def _serialize_messages(messages: list[ChatMessage]) -> list[dict[str, Any]]:
     """转换 harness 历史，并拒绝当前 provider 协议没有定义的本地角色。"""
 
     serialized: list[dict[str, Any]] = []
-    for message in messages:
+    message_index = 0
+    while message_index < len(messages):
+        message = messages[message_index]
         # 普通消息可直接复用 role/content；progress 没有独立 provider 角色，因此降级为 assistant 文本。
         role = message.get("role")
         if role in {"system", "user", "assistant", "assistant_progress"}:
             provider_role = "assistant" if role == "assistant_progress" else role
             serialized.append({"role": provider_role, "content": message.get("content", "")})
+            message_index += 1
             continue
         if role == "assistant_tool_call":
-            # 本地工具调用是一条独立历史记录，转成带单个 tool_call 的 assistant 消息。
-            serialized.append(_serialize_tool_call(message))
+            # 本地逐条保存调用以配对结果，发送时再还原成 provider 所需的一个调用批次。
+            tool_calls: list[dict[str, Any]] = []
+            assistant_content = message.get("content", "")
+            while (
+                message_index < len(messages)
+                and messages[message_index].get("role") == "assistant_tool_call"
+            ):
+                tool_calls.append(_serialize_tool_call(messages[message_index]))
+                message_index += 1
+            serialized.append(
+                {
+                    "role": "assistant",
+                    "content": assistant_content,
+                    "tool_calls": tool_calls,
+                }
+            )
             continue
         if role == "tool_result":
             # 运行结果必须以 tool 角色返回，供 provider 将其交给后续模型步骤。
             serialized.append(_serialize_tool_result(message))
+            message_index += 1
             continue
         # 未知角色没有可靠的 provider 语义，避免静默丢失或错误篡改历史。
         raise RuntimeError(f"Cannot serialize unsupported local message role: {role!r}.")
     return serialized
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """拒绝 HTTP 重定向，避免认证头被自动转发给重定向目标。"""
+
+    def http_error_302(
+        self,
+        request: Request,
+        response: Any,
+        code: int,
+        message: str,
+        headers: Any,
+    ) -> Any:
+        # 重定向会改变请求目标；Authorization 只对原始 endpoint 有授权意义，
+        # 因此把 3xx 当作普通 HTTP 失败交给 transport 的统一错误边界处理。
+        raise HTTPError(request.full_url, code, message, headers, response)
+
+    # urllib 将这些状态码都路由到重定向 handler，统一拒绝可覆盖跨主机和同主机跳转。
+    http_error_301 = http_error_302
+    http_error_303 = http_error_302
+    http_error_307 = http_error_302
+    http_error_308 = http_error_302
 
 
 def _default_transport(
@@ -119,7 +153,10 @@ def _default_transport(
     request = Request(endpoint, data=request_body, headers=headers, method="POST")
     try:
         # 上下文管理器负责及时关闭连接，timeout 防止网络问题无限阻塞 agent loop。
-        with urlopen(request, timeout=60) as response:
+        # 独立 opener 明确安装禁止重定向的 handler，避免全局默认策略
+        # 把 Authorization 自动带往 Location 指向的未知目标。
+        opener = build_opener(_NoRedirectHandler())
+        with opener.open(request, timeout=60) as response:
             response_body = response.read()
     except HTTPError as error:
         # HTTP 状态足以指导调用方处理，响应体可能包含服务端回显的敏感内容，因此不输出。

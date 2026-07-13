@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 import pytest
@@ -196,6 +198,117 @@ def test_qwen_adapter_serializes_progress_as_assistant_message() -> None:
         {"role": "assistant", "content": "Reading the notes..."}
     ]
     assert step.content == "The task is complete."
+
+
+def test_qwen_adapter_collapses_consecutive_tool_calls_into_one_provider_message() -> None:
+    transport = FakeTransport(
+        {"choices": [{"message": {"content": "The task is complete."}}]}
+    )
+    model = QwenModelAdapter(
+        model="qwen-plus",
+        base_url="https://example.test/v1",
+        api_key="test-key",
+        tools=ToolRegistry([]),
+        transport=transport,
+    )
+
+    model.next(
+        [
+            {"role": "user", "content": "Run both tools."},
+            {
+                "role": "assistant_tool_call",
+                "content": "",
+                "toolUseId": "call-first",
+                "toolName": "first_tool",
+                "input": {"number": 1},
+            },
+            {
+                "role": "assistant_tool_call",
+                "content": "",
+                "toolUseId": "call-second",
+                "toolName": "second_tool",
+                "input": {"number": 2},
+            },
+        ]
+    )
+
+    assert transport.payload["messages"] == [
+        {"role": "user", "content": "Run both tools."},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-first",
+                    "type": "function",
+                    "function": {"name": "first_tool", "arguments": '{"number":1}'},
+                },
+                {
+                    "id": "call-second",
+                    "type": "function",
+                    "function": {"name": "second_tool", "arguments": '{"number":2}'},
+                },
+            ],
+        },
+    ]
+
+
+def test_qwen_adapter_default_transport_does_not_follow_redirects_with_authorization() -> None:
+    target_headers: list[dict[str, str]] = []
+
+    class TargetHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            target_headers.append(dict(self.headers.items()))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"choices":[{"message":{"content":"unexpected"}}]}')
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+    target_server = ThreadingHTTPServer(("127.0.0.1", 0), TargetHandler)
+    target_thread = threading.Thread(target=target_server.serve_forever, daemon=True)
+    target_thread.start()
+
+    class RedirectHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802
+            self.send_response(302)
+            self.send_header(
+                "Location",
+                f"http://127.0.0.1:{target_server.server_port}/redirect-target",
+            )
+            self.end_headers()
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+    redirect_server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+    redirect_thread = threading.Thread(target=redirect_server.serve_forever, daemon=True)
+    redirect_thread.start()
+
+    try:
+        model = QwenModelAdapter(
+            model="qwen-plus",
+            base_url=f"http://127.0.0.1:{redirect_server.server_port}/v1",
+            api_key="secret-key",
+            tools=ToolRegistry([]),
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="Qwen-compatible request failed with HTTP status 302\\.",
+        ):
+            model.next([{"role": "user", "content": "Hello."}])
+    finally:
+        redirect_server.shutdown()
+        redirect_server.server_close()
+        target_server.shutdown()
+        target_server.server_close()
+        redirect_thread.join()
+        target_thread.join()
+
+    assert target_headers == []
 
 
 def test_qwen_adapter_rejects_non_function_provider_tool_call() -> None:

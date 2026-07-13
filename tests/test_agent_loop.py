@@ -64,6 +64,48 @@ def test_agent_turn_executes_tool_and_returns_final_assistant() -> None:
     assert model.received_messages[1][-1]["role"] == "tool_result"
 
 
+def test_agent_turn_records_all_tool_intents_before_the_first_tool_result() -> None:
+    model = ScriptedModel(
+        [
+            AgentStep(
+                type="tool_calls",
+                calls=[
+                    {"id": "call-1", "toolName": "echo", "input": {"text": "first"}},
+                    {"id": "call-2", "toolName": "echo", "input": {"text": "second"}},
+                ],
+            ),
+            AgentStep(type="assistant", content="done"),
+        ]
+    )
+
+    messages = run_agent_turn(
+        model=model,
+        tools=_echo_registry(),
+        messages=[{"role": "user", "content": "run both echoes"}],
+        cwd=".",
+    )
+
+    first_result_index = next(
+        index for index, message in enumerate(messages) if message["role"] == "tool_result"
+    )
+    assert messages[1:first_result_index] == [
+        {
+            "role": "assistant_tool_call",
+            "content": "",
+            "toolUseId": "call-1",
+            "toolName": "echo",
+            "input": {"text": "first"},
+        },
+        {
+            "role": "assistant_tool_call",
+            "content": "",
+            "toolUseId": "call-2",
+            "toolName": "echo",
+            "input": {"text": "second"},
+        },
+    ]
+
+
 def test_agent_turn_retries_empty_assistant_response_once() -> None:
     model = ScriptedModel(
         [
