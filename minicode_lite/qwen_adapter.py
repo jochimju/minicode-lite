@@ -84,10 +84,11 @@ def _serialize_messages(messages: list[ChatMessage]) -> list[dict[str, Any]]:
 
     serialized: list[dict[str, Any]] = []
     for message in messages:
-        # 普通三种角色可直接复用 role/content，不引入 provider 特有字段。
+        # 普通消息可直接复用 role/content；progress 没有独立 provider 角色，因此降级为 assistant 文本。
         role = message.get("role")
-        if role in {"system", "user", "assistant"}:
-            serialized.append({"role": role, "content": message.get("content", "")})
+        if role in {"system", "user", "assistant", "assistant_progress"}:
+            provider_role = "assistant" if role == "assistant_progress" else role
+            serialized.append({"role": provider_role, "content": message.get("content", "")})
             continue
         if role == "assistant_tool_call":
             # 本地工具调用是一条独立历史记录，转成带单个 tool_call 的 assistant 消息。
@@ -97,7 +98,7 @@ def _serialize_messages(messages: list[ChatMessage]) -> list[dict[str, Any]]:
             # 运行结果必须以 tool 角色返回，供 provider 将其交给后续模型步骤。
             serialized.append(_serialize_tool_result(message))
             continue
-        # progress 目前没有对应的 OpenAI-compatible 消息含义，避免静默丢失历史。
+        # 未知角色没有可靠的 provider 语义，避免静默丢失或错误篡改历史。
         raise RuntimeError(f"Cannot serialize unsupported local message role: {role!r}.")
     return serialized
 
@@ -155,6 +156,11 @@ def _parse_tool_calls(raw_tool_calls: Any) -> list[dict[str, Any]]:
         function = raw_call["function"]
         tool_name = function.get("name")
         raw_arguments = function.get("arguments")
+        # 当前 harness 仅能执行 function 调用，其他 provider 扩展类型不能被错误地当作本地工具。
+        if raw_call.get("type") != "function":
+            raise RuntimeError(
+                "Invalid Qwen-compatible response: tool call type must be 'function'."
+            )
         if not isinstance(call_id, str) or not call_id:
             raise RuntimeError("Invalid Qwen-compatible response: tool call id is missing.")
         if not isinstance(tool_name, str) or not tool_name:
@@ -183,12 +189,13 @@ def _parse_response(response: dict[str, Any]) -> AgentStep:
     if not isinstance(message, dict):
         raise RuntimeError("Invalid Qwen-compatible response: choices[0].message is missing.")
 
-    # 文本优先符合 provider 同时返回说明文字与调用建议时的最小 loop 行为。
+    # 工具调用优先，避免 provider 附带的说明文本让 agent loop 跳过必须执行的行动。
+    if "tool_calls" in message:
+        return AgentStep(type="tool_calls", calls=_parse_tool_calls(message["tool_calls"]))
+    # 没有工具调用时，非空文本才是当前步骤的最终 assistant 回答。
     content = message.get("content")
     if isinstance(content, str) and content:
         return AgentStep(type="assistant", content=content)
-    if "tool_calls" in message:
-        return AgentStep(type="tool_calls", calls=_parse_tool_calls(message["tool_calls"]))
     raise RuntimeError("Invalid Qwen-compatible response: message has no text or tool calls.")
 
 

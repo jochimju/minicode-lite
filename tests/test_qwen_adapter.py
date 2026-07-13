@@ -140,6 +140,7 @@ def test_qwen_adapter_parses_tool_calls_and_json_object_arguments() -> None:
             "choices": [
                 {
                     "message": {
+                        "content": "I will read the notes first.",
                         "tool_calls": [
                             {
                                 "id": "call-read-1",
@@ -173,6 +174,63 @@ def test_qwen_adapter_parses_tool_calls_and_json_object_arguments() -> None:
             "input": {"path": "notes.txt"},
         }
     ]
+
+
+def test_qwen_adapter_serializes_progress_as_assistant_message() -> None:
+    transport = FakeTransport(
+        {"choices": [{"message": {"content": "The task is complete."}}]}
+    )
+    model = QwenModelAdapter(
+        model="qwen-plus",
+        base_url="https://example.test/v1",
+        api_key="test-key",
+        tools=ToolRegistry([]),
+        transport=transport,
+    )
+
+    step = model.next(
+        [{"role": "assistant_progress", "content": "Reading the notes..."}]
+    )
+
+    assert transport.payload["messages"] == [
+        {"role": "assistant", "content": "Reading the notes..."}
+    ]
+    assert step.content == "The task is complete."
+
+
+def test_qwen_adapter_rejects_non_function_provider_tool_call() -> None:
+    model = QwenModelAdapter(
+        model="qwen-plus",
+        base_url="https://example.test/v1",
+        api_key="test-key",
+        tools=ToolRegistry([]),
+        transport=FakeTransport(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "tool_calls": [
+                                {
+                                    "id": "call-unknown-1",
+                                    "type": "custom",
+                                    "function": {
+                                        "name": "read_file",
+                                        "arguments": "{}",
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Invalid Qwen-compatible response: tool call type must be 'function'\\.",
+    ):
+        model.next([{"role": "user", "content": "Read my notes."}])
 
 
 @pytest.mark.parametrize(
