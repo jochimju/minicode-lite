@@ -15,6 +15,7 @@ dev = ["pytest>=8.0.0"]
 
 [project.scripts]
 minicode-lite = "minicode_lite.main:main"
+minicode-lite-headless = "minicode_lite.headless:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
@@ -26,4 +27,3 @@ package-dir = {"" = "."}
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["minicode_lite*"]
-
