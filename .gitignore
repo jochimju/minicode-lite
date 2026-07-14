@@ -12,4 +12,4 @@ build/
 .mini-code-session-memory/
 .minicode-lite-memory/
 .temp/
-
+.worktrees/

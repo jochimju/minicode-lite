@@ -6,7 +6,19 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from minicode_lite.main import run
+
+
+@pytest.fixture(autouse=True)
+def _force_mock_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """让 CLI 离线测试不受开发者本机真实模型配置影响。"""
+
+    # 测试目标是 Stage 5 的 mock CLI 行为，置空高优先级字段可阻止 .env 触发网络调用。
+    monkeypatch.setenv("MINI_CODE_MODEL", "")
+    monkeypatch.setenv("CUSTOM_API_BASE_URL", "")
+    monkeypatch.setenv("CUSTOM_API_KEY", "")
 
 
 def test_cli_prompt_runs_headless_turn(tmp_path: Path) -> None:
@@ -54,3 +66,35 @@ def test_module_cli_accepts_prompt(tmp_path: Path) -> None:
 
     assert completed.returncode == 0
     assert completed.stdout.strip() == "MiniCode Lite mock model received your message."
+
+
+def test_cli_reports_runtime_error_without_traceback(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_provider(_prompt: str, *, cwd: str | Path | None = None) -> str:
+        del cwd
+        raise RuntimeError("Bearer stage6-secret-token")
+
+    monkeypatch.setattr("minicode_lite.main.run_headless", fail_provider)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = run(["hello"], stdout=stdout, stderr=stderr)
+
+    assert exit_code == 1
+    assert stdout.getvalue() == ""
+    assert stderr.getvalue() == "Error: model provider request failed\n"
+    assert "stage6-secret-token" not in stderr.getvalue()
+    assert "Traceback" not in stderr.getvalue()
+
+
+def test_cli_preserves_value_error_handling(monkeypatch: pytest.MonkeyPatch) -> None:
+    def reject_prompt(_prompt: str, *, cwd: str | Path | None = None) -> str:
+        del cwd
+        raise ValueError("empty prompt")
+
+    monkeypatch.setattr("minicode_lite.main.run_headless", reject_prompt)
+    stderr = io.StringIO()
+
+    exit_code = run(["hello"], stderr=stderr)
+
+    assert exit_code == 1
+    assert stderr.getvalue() == "Error: empty prompt\n"

@@ -139,9 +139,12 @@ def run_agent_turn(
             return working_messages
 
         if next_step.type == "tool_calls":
+            # 一个模型步骤中的所有调用同属同一轮决策，必须先完整写入意图批次，
+            # 才能让后续 provider 适配器把它们还原为一个 assistant/tool_calls 消息。
             for call in next_step.calls:
-                # 先记录模型意图，保证即使工具失败也有完整的调用轨迹。
                 _append_tool_call_message(working_messages, call)
+
+            for call in next_step.calls:
                 if on_tool_start is not None:
                     # 工具启动回调支持 CLI/TUI 等产品层展示生命周期。
                     on_tool_start(call["toolName"], call["input"])
