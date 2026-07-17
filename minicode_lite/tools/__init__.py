@@ -7,11 +7,12 @@ from minicode_lite.tools.edit_file import edit_file_tool
 from minicode_lite.tools.list_files import list_files_tool
 from minicode_lite.tools.patch_file import patch_file_tool
 from minicode_lite.tools.read_file import read_file_tool
+from minicode_lite.tools.run_command import run_command_tool
 from minicode_lite.tools.write_file import write_file_tool
 
 
 def create_default_tool_registry() -> ToolRegistry:
-    """按稳定顺序创建包含所有阶段 4 文件工具的全新 ToolRegistry。"""
+    """按稳定顺序创建包含文件工具和阶段 7 命令工具的全新 ToolRegistry。"""
 
     return ToolRegistry(
         [
@@ -21,6 +22,7 @@ def create_default_tool_registry() -> ToolRegistry:
             write_file_tool,
             edit_file_tool,
             patch_file_tool,
+            run_command_tool,
         ]
     )
 
@@ -32,5 +34,6 @@ __all__ = [
     "list_files_tool",
     "patch_file_tool",
     "read_file_tool",
+    "run_command_tool",
     "write_file_tool",
 ]

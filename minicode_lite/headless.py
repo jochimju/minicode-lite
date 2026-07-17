@@ -10,6 +10,7 @@ from minicode_lite.agent_loop import run_agent_turn
 from minicode_lite.config import load_runtime_config
 from minicode_lite.local_commands import try_handle_local_command
 from minicode_lite.model_registry import create_model_adapter
+from minicode_lite.permissions import PermissionManager
 from minicode_lite.prompt import build_system_prompt
 from minicode_lite.tools import create_default_tool_registry
 from minicode_lite.types import ChatMessage
@@ -40,9 +41,16 @@ def run_headless(prompt: str, *, cwd: str | Path | None = None) -> str:
     workspace = Path.cwd() if cwd is None else Path(cwd)
     # 每个 headless turn 构造干净的默认工具注册表，不携带上次调用的状态。
     tools = create_default_tool_registry()
+    # headless 没有交互审批界面，因此权限管理器对编辑和非只读命令采用默认拒绝。
+    permissions = PermissionManager(workspace)
 
     # `/tools`、`/read` 等本地命令无需消耗模型调用，优先直接分流处理。
-    local_result = try_handle_local_command(user_prompt, tools=tools, cwd=workspace)
+    local_result = try_handle_local_command(
+        user_prompt,
+        tools=tools,
+        cwd=workspace,
+        permissions=permissions,
+    )
     if local_result is not None:
         return local_result
 
@@ -52,7 +60,14 @@ def run_headless(prompt: str, *, cwd: str | Path | None = None) -> str:
     model, _diagnostic = create_model_adapter(config, tools)
     # system 消息必须在用户任务之前，使模型先获得工作区、工具清单和当前能力边界。
     messages: list[ChatMessage] = [
-        {"role": "system", "content": build_system_prompt(cwd=str(workspace), tools=tools)},
+        {
+            "role": "system",
+            "content": build_system_prompt(
+                cwd=str(workspace),
+                tools=tools,
+                permissions=permissions,
+            ),
+        },
         {"role": "user", "content": user_prompt},
     ]
     result_messages = run_agent_turn(
@@ -60,6 +75,7 @@ def run_headless(prompt: str, *, cwd: str | Path | None = None) -> str:
         tools=tools,
         messages=messages,
         cwd=str(workspace),
+        permissions=permissions,
     )
     # headless 只暴露本轮最终回答，不泄漏内部消息协议给命令行用户。
     return _last_assistant_content(result_messages)

@@ -467,6 +467,12 @@ minicode-lite/
 - 标签：`stage-07`
 - 推送 GitHub/Gitee。
 
+### 完成状态（已完成）
+
+阶段 07 的权限管理、编辑审批、命令执行工具、turn 级授权生命周期和学习总结已补齐。2026-07-17 的本次全量测试结果为 `88 passed, 1 skipped`；跳过项仍是需要显式启用的 live Qwen 测试。危险命令、下载后执行片段、编辑拒绝、命令超时和大输出截断均有离线测试验证。
+
+- 学习总结：[stage-07-permissions-and-command-execution.md](docs/stage-summaries/stage-07-permissions-and-command-execution.md)
+
 ## 阶段 8：session 持久化和 replay
 
 目标：让一次 agent turn 不再只是内存里的临时过程，而是可检查、可回放的运行记录。

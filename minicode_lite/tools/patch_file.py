@@ -5,7 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from minicode_lite.tooling import ToolContext, ToolDefinition, ToolResult
-from minicode_lite.tools._shared import read_text_file, resolve_for_tool, write_text_file
+from minicode_lite.tools._shared import (
+    build_diff_preview,
+    ensure_edit_for_tool,
+    read_text_file,
+    resolve_for_tool,
+    write_text_file,
+)
 
 
 def _validate(input_data: Any) -> dict[str, Any]:
@@ -60,6 +66,8 @@ def _run(input_data: dict[str, Any], context: ToolContext) -> ToolResult:
     # 共享读取成功时内容一定存在。
     assert content is not None
 
+    # 保存原始内容，全部替换完成后用它生成一次整体 diff。
+    original_content = content
     applied = 0
     for index, replacement in enumerate(input_data["replacements"], start=1):
         # 按顺序在最新 content 上查找，使后一段可依赖前一段的变换结果。
@@ -74,7 +82,11 @@ def _run(input_data: dict[str, Any], context: ToolContext) -> ToolResult:
         content = content.replace(replacement["old"], replacement["new"], count)
         applied += 1
 
-    # 全部补丁成功后只写盘一次，避免半成品修改落到磁盘。
+    # 全部补丁成功后先审批整体差异，再只写盘一次，避免半成品修改落到磁盘。
+    preview = build_diff_preview(input_data["path"], original_content, content)
+    approval_error = ensure_edit_for_tool(context, target, preview)
+    if approval_error is not None:
+        return approval_error
     result = write_text_file(target, input_data["path"], content)
     if not result.ok:
         return result

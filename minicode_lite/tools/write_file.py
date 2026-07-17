@@ -5,7 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from minicode_lite.tooling import ToolContext, ToolDefinition, ToolResult
-from minicode_lite.tools._shared import resolve_for_tool, write_text_file
+from minicode_lite.tools._shared import (
+    build_diff_preview,
+    ensure_edit_for_tool,
+    read_text_file,
+    resolve_for_tool,
+    write_text_file,
+)
 
 
 def _validate(input_data: Any) -> dict[str, str]:
@@ -32,6 +38,18 @@ def _run(input_data: dict[str, str], context: ToolContext) -> ToolResult:
         return error
     # 无权限错误即代表已获得可用规范化路径。
     assert target is not None
+    # 覆盖已有文件时先读取旧内容，审批界面才能展示真实前后差异。
+    before = ""
+    if target.exists():
+        before_content, read_error = read_text_file(target, input_data["path"])
+        if read_error is not None:
+            return read_error
+        assert before_content is not None
+        before = before_content
+    preview = build_diff_preview(input_data["path"], before, input_data["content"])
+    approval_error = ensure_edit_for_tool(context, target, preview)
+    if approval_error is not None:
+        return approval_error
     return write_text_file(target, input_data["path"], input_data["content"])
 
 

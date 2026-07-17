@@ -8,6 +8,7 @@ import pytest
 from minicode_lite.config import RuntimeConfig
 from minicode_lite.headless import run, run_headless
 from minicode_lite.mock_model import ScriptedModel
+from minicode_lite.permissions import PermissionManager
 from minicode_lite.prompt import build_system_prompt
 from minicode_lite.types import AgentStep
 
@@ -61,7 +62,11 @@ def test_run_headless_passes_system_prompt_before_user_prompt(
         [
             {
                 "role": "system",
-                "content": build_system_prompt(cwd=str(tmp_path), tools=captured["tools"]),
+                    "content": build_system_prompt(
+                        cwd=str(tmp_path),
+                        tools=captured["tools"],
+                        permissions=PermissionManager(tmp_path),
+                    ),
             },
             {"role": "user", "content": "explain the workspace"},
         ]

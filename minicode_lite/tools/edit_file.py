@@ -5,7 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from minicode_lite.tooling import ToolContext, ToolDefinition, ToolResult
-from minicode_lite.tools._shared import read_text_file, resolve_for_tool, write_text_file
+from minicode_lite.tools._shared import (
+    build_diff_preview,
+    ensure_edit_for_tool,
+    read_text_file,
+    resolve_for_tool,
+    write_text_file,
+)
 
 
 def _validate(input_data: Any) -> dict[str, Any]:
@@ -66,6 +72,11 @@ def _run(input_data: dict[str, Any], context: ToolContext) -> ToolResult:
     # str.replace 的 -1 表示替换全部，1 表示只替换第一个匹配。
     count = -1 if replace_all else 1
     updated = content.replace(input_data["old"], input_data["new"], count)
+    # 只有替换规则全部验证通过后才请求审批，避免让用户确认一个不会执行的修改。
+    preview = build_diff_preview(input_data["path"], content, updated)
+    approval_error = ensure_edit_for_tool(context, target, preview)
+    if approval_error is not None:
+        return approval_error
     result = write_text_file(target, input_data["path"], updated)
     # 共享写入函数可能返回磁盘/权限错误，不能假设更新已经落盘。
     if not result.ok:

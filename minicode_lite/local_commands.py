@@ -3,6 +3,7 @@ from __future__ import annotations
 # 处理不需要模型推理的本地 slash 命令，并将其他输入交回 agent。
 
 from pathlib import Path
+from typing import Any
 
 from minicode_lite.tooling import ToolContext, ToolRegistry
 
@@ -19,6 +20,7 @@ def try_handle_local_command(
     *,
     tools: ToolRegistry,
     cwd: str | Path,
+    permissions: Any | None = None,
 ) -> str | None:
     """尝试本地处理输入；返回 None 明确表示应交给模型执行。"""
 
@@ -36,7 +38,7 @@ def try_handle_local_command(
         result = tools.execute(
             "read_file",
             {"path": path},
-            ToolContext(cwd=str(cwd)),
+            ToolContext(cwd=str(cwd), permissions=permissions),
         )
         # 不论成功还是失败都返回工具输出，用户能直接看到文件内容或错误原因。
         return result.output

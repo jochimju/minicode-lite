@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from minicode_lite.agent_loop import run_agent_turn
 from minicode_lite.mock_model import ScriptedModel
 from minicode_lite.tooling import ToolContext, ToolDefinition, ToolRegistry, ToolResult
@@ -213,3 +215,30 @@ def test_agent_turn_does_not_mutate_input_messages() -> None:
 
     assert initial == [{"role": "user", "content": "hello"}]
     assert messages != initial
+
+
+def test_agent_turn_closes_permission_lifecycle_after_model_error() -> None:
+    events: list[str] = []
+
+    class Permissions:
+        def begin_turn(self) -> None:
+            events.append("begin")
+
+        def end_turn(self) -> None:
+            events.append("end")
+
+    class FailingModel:
+        def next(self, _messages: list[ChatMessage], store: object | None = None) -> AgentStep:
+            del store
+            raise RuntimeError("model failed")
+
+    with pytest.raises(RuntimeError, match="model failed"):
+        run_agent_turn(
+            model=FailingModel(),
+            tools=ToolRegistry([]),
+            messages=[{"role": "user", "content": "hello"}],
+            cwd=".",
+            permissions=Permissions(),
+        )
+
+    assert events == ["begin", "end"]

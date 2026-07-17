@@ -77,7 +77,7 @@ def _append_tool_result_message(
     )
 
 
-def run_agent_turn(
+def _run_agent_turn_impl(
     *,
     model: ModelAdapter,
     tools: ToolRegistry,
@@ -185,3 +185,49 @@ def run_agent_turn(
         on_assistant_message,
     )
     return working_messages
+
+
+def run_agent_turn(
+    *,
+    model: ModelAdapter,
+    tools: ToolRegistry,
+    messages: list[ChatMessage],
+    cwd: str,
+    max_steps: int = 8,
+    permissions: Any | None = None,
+    session: Any | None = None,
+    runtime: dict[str, Any] | None = None,
+    store: Any | None = None,
+    on_tool_start: Callable[[str, Any], None] | None = None,
+    on_tool_result: Callable[[str, str, bool], None] | None = None,
+    on_assistant_message: Callable[[str], None] | None = None,
+    on_progress_message: Callable[[str], None] | None = None,
+) -> list[ChatMessage]:
+    """建立 turn 级权限生命周期，再执行最小 agent loop。"""
+
+    # PermissionManager 是可选扩展；仅在对象提供生命周期方法时调用，兼容测试假对象。
+    begin_turn = getattr(permissions, "begin_turn", None)
+    end_turn = getattr(permissions, "end_turn", None)
+    if callable(begin_turn):
+        begin_turn()
+    try:
+        # 实际消息循环保留在独立函数中，使所有提前返回都能经过 finally 撤销临时授权。
+        return _run_agent_turn_impl(
+            model=model,
+            tools=tools,
+            messages=messages,
+            cwd=cwd,
+            max_steps=max_steps,
+            permissions=permissions,
+            session=session,
+            runtime=runtime,
+            store=store,
+            on_tool_start=on_tool_start,
+            on_tool_result=on_tool_result,
+            on_assistant_message=on_assistant_message,
+            on_progress_message=on_progress_message,
+        )
+    finally:
+        # 模型异常或工具回调异常时同样清理授权，不能泄漏到下一轮。
+        if callable(end_turn):
+            end_turn()

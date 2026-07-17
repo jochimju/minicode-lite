@@ -43,3 +43,18 @@ def test_build_system_prompt_marks_an_empty_registry_explicitly() -> None:
     assert "Tools:\n- No tools registered." in prompt
     assert "Permissions: not configured" in prompt
     assert "Memory: not configured" in prompt
+
+
+def test_build_system_prompt_includes_configured_permission_summary() -> None:
+    class Permissions:
+        def get_summary(self) -> list[str]:
+            return ["workspace: D:/workspace/demo", "edits require approval"]
+
+    prompt = build_system_prompt(
+        cwd="D:/workspace/demo",
+        tools=ToolRegistry([]),
+        permissions=Permissions(),
+    )
+
+    assert "Permissions:\n- workspace: D:/workspace/demo\n- edits require approval" in prompt
+    assert "Permissions: not configured" not in prompt
