@@ -182,6 +182,40 @@ python -m pytest tests/test_live_qwen.py -m live_qwen -q
 - 连续两个 `assistant_tool_call` 在 provider 请求里应当长什么样？
 - 为什么 live test 要同时检查显式开关和配置完整性？
 
+## 面试高频问题与参考答案
+
+### 1. 为什么运行时配置要集中加载，而不能让各模块直接读取环境变量？
+
+**参考答案：** 集中加载可以统一配置来源、优先级、默认值和诊断规则，并把敏感值限制在明确边界内。如果 adapter、CLI 和 registry 各自读取环境变量，同一个字段可能采用不同名字或优先级，测试也难隔离本机环境。`RuntimeConfig` 让上层依赖一个确定对象，而不是依赖散落的全局状态。
+
+### 2. 为什么配置优先级要逐字段合并，而不是整份来源二选一？
+
+**参考答案：** 用户可能只用环境变量覆盖 model，而 base URL 和 key 仍来自 `.env` 或 settings。如果高优先级来源只要存在一个字段就整份覆盖，其他字段会意外丢失。逐字段采用“环境变量 > `.env` > settings”既保留明确优先级，也支持部分覆盖；测试要覆盖混合来源而不只是完整配置。
+
+### 3. 为什么配置不完整时回退 mock，而不是带着半份配置调用真实模型？
+
+**参考答案：** 真实调用至少需要模型名、base URL 和 API key 形成完整条件，半份配置只会产生模糊网络或认证错误。mock fallback 保证学习项目离线可运行，单元测试也不依赖外部服务。与此同时应提供不含密钥的诊断，告诉用户缺少哪些配置，避免回退行为变成不可见故障。
+
+### 4. model registry 和 provider adapter 的职责有什么区别？
+
+**参考答案：** registry 决定根据配置创建哪个 adapter，并返回选择诊断；adapter 负责把统一消息和工具定义转换成某个 provider 协议，再把响应还原成 `AgentStep`。registry 处理“选谁”，adapter 处理“怎么说话”。agent loop 不应判断 API key，也不应理解 HTTP 请求字段。
+
+### 5. OpenAI-compatible 工具调用协议转换最容易出错的地方是什么？
+
+**参考答案：** 常见错误包括 arguments JSON 编解码、工具调用 ID 配对，以及把同一 assistant step 的多次 tool calls 拆成多个 provider assistant 消息。本地历史为了执行方便可以逐条存储，但 adapter 发回 provider 时必须恢复连续批次，并把每个 tool result 关联到原调用 ID，否则 provider 会拒绝协议或模型失去上下文。
+
+### 6. system prompt 为什么属于运行时组合层，而不应该硬编码在 adapter 中？
+
+**参考答案：** system prompt 需要组合 cwd、工具清单、权限和 memory 等动态 harness 信息，这些与具体 provider 无关。adapter 只负责协议映射；把 prompt 硬编码进去会让不同 provider 重复业务规则，也难在测试中验证当前工具和工作区是否正确注入。prompt 构建器应输出稳定、可诊断且不含凭据的文本。
+
+### 7. 场景题：provider 返回 302 重定向，为什么 adapter 不应直接带着 Authorization 自动跟随？
+
+**参考答案：** 重定向目标可能不是原受信任主机，自动转发认证头会把 API key 暴露给非预期服务。安全做法是拒绝带凭据请求的自动重定向，报告受控错误，让配置方显式修正 base URL。测试可启动本地重定向服务器并断言目标服务从未收到请求头，这比只检查异常文本更有说服力。
+
+### 8. live model test 为什么必须显式 opt-in？
+
+**参考答案：** live test 会依赖网络、真实凭据、服务可用性和额度，默认运行会让普通回归测试变慢且不稳定，还可能产生费用。单元测试应用 fake transport 验证请求和响应映射，live test 只验证真实 endpoint 连通性，并同时要求显式环境开关和完整配置。跳过 live test 不代表没有测试 adapter 逻辑。
+
 ## 下一阶段衔接
 
 本阶段解决了：

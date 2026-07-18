@@ -13,15 +13,16 @@ from minicode_lite.headless import run_headless
 # READY_MESSAGE 让未提供任务时的最小安装验证有稳定可断言的输出。
 READY_MESSAGE = "MiniCode Lite ready"
 
-
+#-> argparse.ArgumentParser：类型提示，表示函数预计返回一个 ArgumentParser 对象。
 def build_parser() -> argparse.ArgumentParser:
     """构建主 CLI 参数解析器，独立出来以便测试命令行契约。"""
-
+    #创建命令行解析器parser
     parser = argparse.ArgumentParser(
         prog="minicode-lite",
         description="MiniCode Lite command line entry point.",
     )
     # 版本查询不应启动模型或工具，因此采用独立布尔开关。
+    #action="store_true" 表示： 没写 --version，得到 False，写了 --version，得到 True
     parser.add_argument(
         "--version",
         action="store_true",
@@ -30,18 +31,19 @@ def build_parser() -> argparse.ArgumentParser:
     # 剩余位置参数组成一次 headless prompt，兼容 `python -m ... hello world`。
     parser.add_argument(
         "prompt",
-        nargs="*",
+        nargs="*", #nargs="*" 表示它可以接收零个或多个值，并将结果保存为列表
         help="Prompt to run once in headless mode.",
     )
     return parser
 
 
 def run(
+    #4个形参 参数名 ：  类型提示 = 默认值
     argv: Sequence[str] | None = None,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
     cwd: str | Path | None = None,
-) -> int:
+) -> int:  # 0：执行成功  非 0：执行失败
     """处理版本、单轮 prompt 和无参数 smoke 三种 CLI 模式。"""
 
     parser = build_parser()
@@ -68,6 +70,7 @@ def run(
         return 0
 
     # 将 argparse 收集的词组恢复成用户输入的一次任务文本。
+    # join() 使用一个空格连接所有字符串：
     prompt = " ".join(args.prompt).strip()
     if prompt:
         try:

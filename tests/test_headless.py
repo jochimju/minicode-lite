@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from minicode_lite import session as session_module
 from minicode_lite.config import RuntimeConfig
 from minicode_lite.headless import run, run_headless
 from minicode_lite.mock_model import ScriptedModel
@@ -14,13 +15,15 @@ from minicode_lite.types import AgentStep
 
 
 @pytest.fixture(autouse=True)
-def _force_mock_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+def _force_mock_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """隔离本机 .env，确保 headless 单元测试始终覆盖 mock 契约。"""
 
     # 环境变量优先级最高；显式置空可覆盖本机真实凭据，防止离线测试意外触网。
     monkeypatch.setenv("MINI_CODE_MODEL", "")
     monkeypatch.setenv("CUSTOM_API_BASE_URL", "")
     monkeypatch.setenv("CUSTOM_API_KEY", "")
+    # 每个测试使用隔离目录，避免 headless 自动保存把真实 session 写进用户目录。
+    monkeypatch.setattr(session_module, "SESSIONS_DIR", tmp_path / "sessions")
 
 
 def test_run_headless_rejects_empty_prompt(tmp_path: Path) -> None:
@@ -70,6 +73,50 @@ def test_run_headless_passes_system_prompt_before_user_prompt(
             },
             {"role": "user", "content": "explain the workspace"},
         ]
+    ]
+
+
+def test_run_headless_persists_messages_and_transcript(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = ScriptedModel(
+        [
+            AgentStep(
+                type="tool_calls",
+                calls=[
+                    {
+                        "id": "call-1",
+                        "toolName": "read_file",
+                        "input": {"path": "demo.txt"},
+                    }
+                ],
+            ),
+            AgentStep(type="assistant", content="saved response", kind="final"),
+        ]
+    )
+    (tmp_path / "demo.txt").write_text("session body", encoding="utf-8")
+    monkeypatch.setattr(
+        "minicode_lite.headless.create_model_adapter",
+        lambda _config, _tools: (model, "test"),
+    )
+
+    result = run_headless("read demo.txt", cwd=tmp_path)
+    saved = session_module.get_latest_session(workspace=tmp_path)
+
+    assert result == "saved response"
+    assert saved is not None
+    assert [message["role"] for message in saved.messages] == [
+        "system",
+        "user",
+        "assistant_tool_call",
+        "tool_result",
+        "assistant",
+    ]
+    assert [entry["kind"] for entry in saved.transcript_entries] == [
+        "user",
+        "assistant_tool_call",
+        "tool_result",
+        "assistant",
     ]
 
 

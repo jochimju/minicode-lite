@@ -12,6 +12,7 @@ from minicode_lite.local_commands import try_handle_local_command
 from minicode_lite.model_registry import create_model_adapter
 from minicode_lite.permissions import PermissionManager
 from minicode_lite.prompt import build_system_prompt
+from minicode_lite.session import create_new_session, save_session
 from minicode_lite.tools import create_default_tool_registry
 from minicode_lite.types import ChatMessage
 
@@ -70,13 +71,23 @@ def run_headless(prompt: str, *, cwd: str | Path | None = None) -> str:
         },
         {"role": "user", "content": user_prompt},
     ]
-    result_messages = run_agent_turn(
-        model=model,
-        tools=tools,
-        messages=messages,
-        cwd=str(workspace),
-        permissions=permissions,
-    )
+    # 每个真实模型 turn 都创建独立 session；本地只读命令没有 agent 消息循环，因此不落 session。
+    session = create_new_session(workspace=workspace)
+    session.messages = [dict(message) for message in messages]
+    try:
+        result_messages = run_agent_turn(
+            model=model,
+            tools=tools,
+            messages=messages,
+            cwd=str(workspace),
+            permissions=permissions,
+            session=session,
+        )
+        # 成功时用 loop 返回的完整历史替换输入快照，使工具请求、结果和最终回答全部可回放。
+        session.messages = [dict(message) for message in result_messages]
+    finally:
+        # provider 或工具路径抛出异常时仍保留已经建立的输入记录，便于事后定位失败 turn。
+        save_session(session)
     # headless 只暴露本轮最终回答，不泄漏内部消息协议给命令行用户。
     return _last_assistant_content(result_messages)
 
