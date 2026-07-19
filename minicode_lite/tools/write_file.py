@@ -7,6 +7,7 @@ from typing import Any
 from minicode_lite.tooling import ToolContext, ToolDefinition, ToolResult
 from minicode_lite.tools._shared import (
     build_diff_preview,
+    checkpoint_for_tool,
     ensure_edit_for_tool,
     read_text_file,
     resolve_for_tool,
@@ -50,6 +51,8 @@ def _run(input_data: dict[str, str], context: ToolContext) -> ToolResult:
     approval_error = ensure_edit_for_tool(context, target, preview)
     if approval_error is not None:
         return approval_error
+    # checkpoint 保存成功后才允许覆盖文件，确保任何已执行修改都有恢复依据。
+    checkpoint_for_tool(context, target, before)
     return write_text_file(target, input_data["path"], input_data["content"])
 
 

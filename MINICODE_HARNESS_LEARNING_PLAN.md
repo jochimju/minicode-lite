@@ -624,6 +624,12 @@ minicode-lite/
 - 标签：`stage-09`
 - 推送 GitHub/Gitee。
 
+### 完成状态（已完成）
+
+阶段 09 已实现文件工具写入前 checkpoint、session 全量 JSON 持久化、按 steps 或 checkpoint ID 选择恢复点、纯预览、checkpoint 列表和带反向安全快照的 rewind。恢复前会整批验证路径仍位于 session workspace 内且目标不是目录，避免被篡改的持久数据越界或多文件恢复只完成一半。2026-07-19 的全量测试结果见本阶段学习总结。
+
+- 学习总结：[`stage-09-checkpoint-and-rewind.md`](docs/stage-summaries/stage-09-checkpoint-and-rewind.md)
+
 ## 阶段 10：最小 memory 系统
 
 目标：实现轻量记忆闭环：写入项目知识，下一轮 prompt 能检索并注入相关内容。

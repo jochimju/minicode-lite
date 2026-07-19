@@ -6,6 +6,7 @@ import pytest
 
 import minicode_lite.tools.run_command as run_command_module
 from minicode_lite.permissions import PermissionManager
+from minicode_lite.session import create_new_session, rewind_session_data
 from minicode_lite.tooling import ToolContext
 from minicode_lite.tools import create_default_tool_registry
 from minicode_lite.tools.edit_file import edit_file_tool
@@ -43,6 +44,24 @@ def test_write_file_tool_writes_new_utf8_file(tmp_path: Path) -> None:
     assert result.ok is True
     assert result.output == "Wrote notes/demo.txt"
     assert (tmp_path / "notes" / "demo.txt").read_text(encoding="utf-8") == "hello\n"
+
+
+def test_write_file_records_existing_content_before_overwrite(tmp_path: Path) -> None:
+    target = tmp_path / "demo.txt"
+    target.write_text("before\n", encoding="utf-8")
+    session = create_new_session(workspace=tmp_path)
+
+    result = write_file_tool.run(
+        {"path": "demo.txt", "content": "after\n"},
+        ToolContext(cwd=str(tmp_path), session=session),
+    )
+
+    assert result.ok is True
+    assert len(session.checkpoints) == 1
+    assert session.checkpoints[0].existed is True
+    assert session.checkpoints[0].previous_content == "before\n"
+    rewind_session_data(session)
+    assert target.read_text(encoding="utf-8") == "before\n"
 
 
 def test_edit_file_tool_replaces_one_matching_block(tmp_path: Path) -> None:
@@ -90,6 +109,28 @@ def test_patch_file_tool_applies_multiple_replacements(tmp_path: Path) -> None:
     assert result.ok is True
     assert "2 replacement" in result.output
     assert target.read_text(encoding="utf-8") == "hi world\nhi agent\n"
+
+
+@pytest.mark.parametrize(
+    ("tool", "input_data"),
+    [
+        (edit_file_tool, {"path": "demo.txt", "old": "before", "new": "edited"}),
+        (
+            patch_file_tool,
+            {"path": "demo.txt", "replacements": [{"old": "before", "new": "patched"}]},
+        ),
+    ],
+)
+def test_editing_tools_record_one_pre_write_checkpoint(tmp_path: Path, tool, input_data) -> None:
+    target = tmp_path / "demo.txt"
+    target.write_text("before", encoding="utf-8")
+    session = create_new_session(workspace=tmp_path)
+
+    result = tool.run(input_data, ToolContext(cwd=str(tmp_path), session=session))
+
+    assert result.ok is True
+    assert len(session.checkpoints) == 1
+    assert session.checkpoints[0].previous_content == "before"
 
 
 def test_file_tools_reject_paths_that_escape_workspace(tmp_path: Path) -> None:
@@ -164,6 +205,20 @@ def test_write_file_runs_after_edit_prompt_allows(tmp_path: Path) -> None:
 
     assert result.ok is True
     assert (tmp_path / "approved.txt").read_text(encoding="utf-8") == "approved\n"
+
+
+def test_denied_write_does_not_create_checkpoint(tmp_path: Path) -> None:
+    session = create_new_session(workspace=tmp_path)
+    manager = PermissionManager(tmp_path, prompt_handler=lambda request: "deny_once")
+
+    result = write_file_tool.run(
+        {"path": "denied.txt", "content": "must not exist"},
+        ToolContext(cwd=str(tmp_path), permissions=manager, session=session),
+    )
+
+    assert result.ok is False
+    assert session.checkpoints == []
+    assert (tmp_path / "denied.txt").exists() is False
 
 
 def test_run_command_tool_supports_read_only_echo(tmp_path: Path) -> None:

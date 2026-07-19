@@ -6,6 +6,7 @@ from difflib import unified_diff
 from pathlib import Path
 
 from minicode_lite.tooling import ToolContext, ToolResult
+from minicode_lite.session import create_file_checkpoint
 from minicode_lite.workspace import resolve_tool_path
 
 
@@ -54,6 +55,22 @@ def ensure_edit_for_tool(
     except PermissionError as error:
         return ToolResult(ok=False, output=str(error))
     return None
+
+
+def checkpoint_for_tool(
+    context: ToolContext,
+    target: Path,
+    previous_content: str,
+) -> None:
+    """在审批通过后、真正写盘前记录旧文件状态。"""
+
+    # target 已由 workspace 层规范化；exists 在此刻反映副作用前的真实状态。
+    create_file_checkpoint(
+        context.session,
+        file_path=target,
+        existed=target.exists(),
+        previous_content=previous_content,
+    )
 
 
 def read_text_file(target: Path, display_path: str) -> tuple[str | None, ToolResult | None]:

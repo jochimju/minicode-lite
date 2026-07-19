@@ -7,6 +7,7 @@ from typing import Any
 from minicode_lite.tooling import ToolContext, ToolDefinition, ToolResult
 from minicode_lite.tools._shared import (
     build_diff_preview,
+    checkpoint_for_tool,
     ensure_edit_for_tool,
     read_text_file,
     resolve_for_tool,
@@ -87,6 +88,8 @@ def _run(input_data: dict[str, Any], context: ToolContext) -> ToolResult:
     approval_error = ensure_edit_for_tool(context, target, preview)
     if approval_error is not None:
         return approval_error
+    # 多段 replacement 是一次原子工具意图，共享一个写前快照即可完整恢复。
+    checkpoint_for_tool(context, target, original_content)
     result = write_text_file(target, input_data["path"], content)
     if not result.ok:
         return result

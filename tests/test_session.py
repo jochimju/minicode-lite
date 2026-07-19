@@ -6,13 +6,19 @@ import pytest
 
 from minicode_lite import session as session_module
 from minicode_lite.session import (
+    FileCheckpoint,
     build_transcript,
+    create_file_checkpoint,
     create_new_session,
+    format_rewind_preview,
+    format_session_checkpoints,
     format_session_inspect,
     format_session_replay,
     get_latest_session,
     list_sessions,
     load_session,
+    rewind_session,
+    rewind_session_data,
     save_session,
 )
 
@@ -156,3 +162,171 @@ def test_load_and_list_skip_corrupt_session():
 def test_load_rejects_path_traversal_id():
     with pytest.raises(ValueError, match="invalid session id"):
         load_session("../outside")
+
+
+def test_checkpoint_round_trip_updates_metadata_count(tmp_path):
+    target = tmp_path / "demo.txt"
+    target.write_text("before\n", encoding="utf-8")
+    session = create_new_session(workspace=tmp_path)
+
+    checkpoint = create_file_checkpoint(
+        session,
+        file_path=target,
+        existed=True,
+        previous_content="before\n",
+    )
+    loaded = load_session(session.session_id)
+
+    assert checkpoint is not None
+    assert loaded is not None
+    assert loaded.checkpoints == [checkpoint]
+    assert loaded.metadata is not None
+    assert loaded.metadata.checkpoint_count == 1
+    assert "Checkpoints: 1" in format_session_inspect(loaded)
+
+
+def test_rewind_new_file_deletes_it_and_can_undo_rewind(tmp_path):
+    target = tmp_path / "created.txt"
+    session = create_new_session(workspace=tmp_path)
+    create_file_checkpoint(
+        session,
+        file_path=target,
+        existed=False,
+        previous_content="",
+    )
+    target.write_text("created later\n", encoding="utf-8")
+
+    restored = rewind_session_data(session)
+
+    assert len(restored) == 1
+    assert target.exists() is False
+    assert len(session.checkpoints) == 1
+    assert session.checkpoints[0].kind == "rewind"
+
+    rewind_session_data(session)
+
+    assert target.read_text(encoding="utf-8") == "created later\n"
+
+
+def test_multiple_edit_checkpoints_rewind_by_steps(tmp_path):
+    target = tmp_path / "demo.txt"
+    target.write_text("zero", encoding="utf-8")
+    session = create_new_session(workspace=tmp_path)
+    create_file_checkpoint(session, file_path=target, existed=True, previous_content="zero")
+    target.write_text("one", encoding="utf-8")
+    create_file_checkpoint(session, file_path=target, existed=True, previous_content="one")
+    target.write_text("two", encoding="utf-8")
+
+    restored = rewind_session_data(session, steps=2)
+
+    assert len(restored) == 2
+    assert target.read_text(encoding="utf-8") == "zero"
+    assert session.metadata is not None
+    assert session.metadata.checkpoint_count == 1
+
+
+def test_rewind_preview_and_checkpoint_format_do_not_modify_disk(tmp_path):
+    target = tmp_path / "demo.txt"
+    target.write_text("current", encoding="utf-8")
+    session = create_new_session(workspace=tmp_path)
+    checkpoint = FileCheckpoint(
+        checkpoint_id="checkpoint01",
+        created_at=1.0,
+        file_path=str(target),
+        existed=True,
+        previous_content="old",
+    )
+    session.checkpoints.append(checkpoint)
+
+    preview = format_rewind_preview(session, checkpoint_id=checkpoint.checkpoint_id)
+    listing = format_session_checkpoints(session)
+
+    assert "Would restore 1 checkpoint(s)" in preview
+    assert "restore pre-edit state" in preview
+    assert checkpoint.checkpoint_id in listing
+    assert "Total: 1 checkpoint(s)" in listing
+    assert target.read_text(encoding="utf-8") == "current"
+
+
+def test_rewind_saved_session_restores_existing_file(tmp_path):
+    target = tmp_path / "demo.txt"
+    target.write_text("before", encoding="utf-8")
+    session = create_new_session(workspace=tmp_path)
+    checkpoint = create_file_checkpoint(
+        session,
+        file_path=target,
+        existed=True,
+        previous_content="before",
+    )
+    assert checkpoint is not None
+    target.write_text("after", encoding="utf-8")
+
+    loaded, restored = rewind_session(session.session_id, checkpoint_id=checkpoint.checkpoint_id)
+
+    assert loaded is not None
+    assert len(restored) == 1
+    assert target.read_text(encoding="utf-8") == "before"
+    persisted = load_session(session.session_id)
+    assert persisted is not None
+    assert persisted.metadata is not None
+    assert persisted.metadata.checkpoint_count == 1
+
+
+def test_rewind_rejects_checkpoint_outside_session_workspace(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("safe", encoding="utf-8")
+    session = create_new_session(workspace=workspace)
+    session.checkpoints.append(
+        FileCheckpoint(
+            checkpoint_id="outside00001",
+            created_at=1.0,
+            file_path=str(outside),
+            existed=True,
+            previous_content="tampered",
+        )
+    )
+
+    with pytest.raises(ValueError, match="escapes session workspace"):
+        rewind_session_data(session)
+
+    assert outside.read_text(encoding="utf-8") == "safe"
+
+
+def test_rewind_preflight_rejects_directory_before_restoring_any_file(tmp_path):
+    first = tmp_path / "first.txt"
+    first.write_text("current", encoding="utf-8")
+    directory = tmp_path / "not-a-file"
+    directory.mkdir()
+    session = create_new_session(workspace=tmp_path)
+    session.checkpoints.extend(
+        [
+            FileCheckpoint("first0000001", 1.0, str(first), True, "old"),
+            FileCheckpoint("second000001", 2.0, str(directory), False, ""),
+        ]
+    )
+
+    with pytest.raises(OSError, match="not a file"):
+        rewind_session_data(session, steps=2)
+
+    assert first.read_text(encoding="utf-8") == "current"
+
+
+def test_rewind_does_not_confuse_duplicate_persisted_checkpoint_ids(tmp_path):
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    first.write_text("first-current", encoding="utf-8")
+    second.write_text("second-current", encoding="utf-8")
+    session = create_new_session(workspace=tmp_path)
+    session.checkpoints.extend(
+        [
+            FileCheckpoint("duplicate001", 1.0, str(first), True, "first-old"),
+            FileCheckpoint("duplicate001", 2.0, str(second), True, "second-old"),
+        ]
+    )
+
+    rewind_session_data(session, steps=2)
+
+    assert first.read_text(encoding="utf-8") == "first-old"
+    assert second.read_text(encoding="utf-8") == "second-old"

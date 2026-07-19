@@ -36,6 +36,22 @@ class SessionMetadata:
     first_message: str = ""
     message_count: int = 0
     transcript_count: int = 0
+    checkpoint_count: int = 0
+
+
+@dataclass(slots=True)
+class FileCheckpoint:
+    """文件工具写盘前留下的持久快照，供 preview 和 rewind 使用。"""
+
+    checkpoint_id: str
+    created_at: float
+    file_path: str
+    existed: bool
+    previous_content: str
+    # edit 表示普通写前快照，rewind 表示回退前的反向安全快照。
+    kind: str = "edit"
+    # 同一次 rewind 涉及的多个文件共享 group_id，下一次回退会把它们视为一个整体。
+    group_id: str = ""
 
 
 @dataclass(slots=True)
@@ -48,6 +64,7 @@ class SessionData:
     workspace: str
     messages: list[ChatMessage] = field(default_factory=list)
     transcript_entries: list[dict[str, Any]] = field(default_factory=list)
+    checkpoints: list[FileCheckpoint] = field(default_factory=list)
     metadata: SessionMetadata | None = None
 
     def update_metadata(self) -> None:
@@ -71,6 +88,7 @@ class SessionData:
             first_message=first_message[:100],
             message_count=len(self.messages),
             transcript_count=len(self.transcript_entries),
+            checkpoint_count=len(self.checkpoints),
         )
 
 
@@ -152,6 +170,7 @@ def save_session(session: SessionData) -> Path:
         "workspace": session.workspace,
         "messages": session.messages,
         "transcript_entries": session.transcript_entries,
+        "checkpoints": [asdict(checkpoint) for checkpoint in session.checkpoints],
         "metadata": asdict(session.metadata) if session.metadata is not None else None,
     }
     # 先写同目录临时文件再替换，避免进程中断留下半截 JSON。
@@ -176,6 +195,9 @@ def load_session(session_id: str) -> SessionData | None:
             return None
         metadata_data = data.get("metadata")
         metadata = SessionMetadata(**metadata_data) if isinstance(metadata_data, dict) else None
+        checkpoint_data = data.get("checkpoints", [])
+        if not isinstance(checkpoint_data, list):
+            return None
         session = SessionData(
             session_id=data["session_id"],
             created_at=float(data["created_at"]),
@@ -183,6 +205,7 @@ def load_session(session_id: str) -> SessionData | None:
             workspace=str(data["workspace"]),
             messages=_copy_messages(data.get("messages", [])),
             transcript_entries=[dict(entry) for entry in data.get("transcript_entries", [])],
+            checkpoints=[FileCheckpoint(**item) for item in checkpoint_data],
             metadata=metadata,
         )
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
@@ -238,6 +261,7 @@ def format_session_inspect(session: SessionData) -> str:
             f"Workspace: {session.workspace}",
             f"Messages: {len(session.messages)}",
             f"Transcript entries: {len(session.transcript_entries)}",
+            f"Checkpoints: {len(session.checkpoints)}",
             f"First user message: {metadata.first_message if metadata else ''}",
         ]
     )
@@ -267,4 +291,192 @@ def format_session_replay(session: SessionData) -> str:
         lines.append("(empty transcript)")
     else:
         lines.extend(_format_transcript_entry(entry) for entry in session.transcript_entries)
+    return "\n".join(lines)
+
+
+def create_file_checkpoint(
+    session: SessionData | None,
+    *,
+    file_path: str | Path,
+    existed: bool,
+    previous_content: str,
+) -> FileCheckpoint | None:
+    """在文件修改前把旧状态追加到 session；无 session 时保持工具可独立使用。"""
+
+    if session is None:
+        # 测试或独立工具调用可以没有 session，此时仍执行写入但不承诺可恢复。
+        return None
+    checkpoint = FileCheckpoint(
+        checkpoint_id=uuid.uuid4().hex[:12],
+        created_at=time.time(),
+        # 工具传入的目标已经过 workspace 解析；再次 resolve 固化稳定绝对路径。
+        file_path=str(Path(file_path).resolve()),
+        existed=existed,
+        previous_content=previous_content,
+    )
+    session.checkpoints.append(checkpoint)
+    # 快照必须先于文件副作用持久化；若保存失败，工具不会继续覆盖磁盘。
+    save_session(session)
+    return checkpoint
+
+
+def _select_checkpoints_to_rewind(
+    session: SessionData,
+    *,
+    steps: int = 1,
+    checkpoint_id: str | None = None,
+) -> list[FileCheckpoint]:
+    """选择从目标点到最新的快照；rewind 安全组始终作为不可拆分的一步。"""
+
+    if not session.checkpoints:
+        return []
+    if checkpoint_id is not None:
+        # 从后向前找能在 ID 重复或历史迁移时优先命中最新记录。
+        for index in range(len(session.checkpoints) - 1, -1, -1):
+            checkpoint = session.checkpoints[index]
+            if checkpoint.checkpoint_id != checkpoint_id:
+                continue
+            if checkpoint.group_id:
+                while index > 0 and session.checkpoints[index - 1].group_id == checkpoint.group_id:
+                    index -= 1
+            return session.checkpoints[index:]
+        return []
+    if steps <= 0:
+        return []
+    start_index = max(len(session.checkpoints) - steps, 0)
+    # 反向快照可能覆盖多个文件，不能只恢复组内最后一个文件。
+    tail_group_id = session.checkpoints[-1].group_id
+    if tail_group_id:
+        group_start = len(session.checkpoints) - 1
+        while group_start > 0 and session.checkpoints[group_start - 1].group_id == tail_group_id:
+            group_start -= 1
+        start_index = min(start_index, group_start)
+    return session.checkpoints[start_index:]
+
+
+def _validated_rewind_target(session: SessionData, checkpoint: FileCheckpoint) -> Path:
+    """重新验证持久化路径，防止被篡改的 session 越过原工作区。"""
+
+    workspace = Path(session.workspace).resolve()
+    target = Path(checkpoint.file_path).resolve()
+    if target == workspace or workspace not in target.parents:
+        raise ValueError(f"checkpoint path escapes session workspace: {checkpoint.file_path}")
+    return target
+
+
+def rewind_session_data(
+    session: SessionData,
+    *,
+    steps: int = 1,
+    checkpoint_id: str | None = None,
+) -> list[FileCheckpoint]:
+    """恢复内存 session 选中的文件快照，并留下可撤销本次回退的安全快照。"""
+
+    selected = _select_checkpoints_to_rewind(
+        session,
+        steps=steps,
+        checkpoint_id=checkpoint_id,
+    )
+    if not selected:
+        return []
+    # 在任何磁盘变化前验证整批路径，避免多文件恢复到一半才发现越界记录。
+    # 保持与 selected 相同的顺序，不用可被持久化数据篡改成重复值的 checkpoint_id 做映射键。
+    targets = [_validated_rewind_target(session, checkpoint) for checkpoint in selected]
+    # 当前磁盘对象若已变成目录，不能按文本文件恢复；整批预检保证失败发生在零副作用阶段。
+    for target in targets:
+        if target.exists() and not target.is_file():
+            raise OSError(f"checkpoint target is not a file: {target}")
+    rewind_group_id = uuid.uuid4().hex[:12]
+    rewind_created_at = time.time()
+    reverse_checkpoints: list[FileCheckpoint] = []
+    captured_paths: set[str] = set()
+    # 同一文件可能被连续编辑多次；反向快照只需保存 rewind 开始时的最终状态一次。
+    for checkpoint, target in zip(reversed(selected), reversed(targets), strict=True):
+        normalized_path = str(target)
+        if normalized_path in captured_paths:
+            continue
+        existed = target.is_file()
+        previous_content = target.read_text(encoding="utf-8") if existed else ""
+        reverse_checkpoints.append(
+            FileCheckpoint(
+                checkpoint_id=uuid.uuid4().hex[:12],
+                created_at=rewind_created_at,
+                file_path=normalized_path,
+                existed=existed,
+                previous_content=previous_content,
+                kind="rewind",
+                group_id=rewind_group_id,
+            )
+        )
+        captured_paths.add(normalized_path)
+    # 倒序应用才能把“第一次前 -> 第二次前”正确还原到最早选中的状态。
+    for checkpoint, target in zip(reversed(selected), reversed(targets), strict=True):
+        if checkpoint.existed:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(checkpoint.previous_content, encoding="utf-8")
+        elif target.exists():
+            target.unlink()
+    del session.checkpoints[-len(selected) :]
+    session.checkpoints.extend(reverse_checkpoints)
+    save_session(session)
+    return selected
+
+
+def rewind_session(
+    session_id: str,
+    *,
+    steps: int = 1,
+    checkpoint_id: str | None = None,
+) -> tuple[SessionData | None, list[FileCheckpoint]]:
+    """加载指定 session 并执行 rewind；不存在时返回空结果而不是触碰磁盘。"""
+
+    session = load_session(session_id)
+    if session is None:
+        return None, []
+    restored = rewind_session_data(session, steps=steps, checkpoint_id=checkpoint_id)
+    return session, restored
+
+
+def format_rewind_preview(
+    session: SessionData,
+    *,
+    steps: int = 1,
+    checkpoint_id: str | None = None,
+) -> str:
+    """只展示计划恢复的快照，不读取或修改当前文件内容。"""
+
+    selected = _select_checkpoints_to_rewind(
+        session,
+        steps=steps,
+        checkpoint_id=checkpoint_id,
+    )
+    if not selected:
+        return f"No checkpoints available to rewind for session {session.session_id}."
+    unique_files = list(dict.fromkeys(checkpoint.file_path for checkpoint in reversed(selected)))
+    lines = [
+        f"Rewind preview for session {session.session_id}:",
+        f"Would restore {len(selected)} checkpoint(s) across {len(unique_files)} file(s).",
+    ]
+    if checkpoint_id is not None:
+        lines.append(f"Target checkpoint: {checkpoint_id}")
+    mode = "undo prior rewind" if any(item.kind == "rewind" for item in selected) else "restore pre-edit state"
+    lines.append(f"Mode: {mode}.")
+    for checkpoint in reversed(selected):
+        state = "existing file" if checkpoint.existed else "new file"
+        lines.append(f"- [{checkpoint.checkpoint_id}] {checkpoint.file_path} -> {state}")
+    return "\n".join(lines)
+
+
+def format_session_checkpoints(session: SessionData) -> str:
+    """按从新到旧的顺序展示 session 当前可用恢复点。"""
+
+    if not session.checkpoints:
+        return f"No checkpoints saved for session {session.session_id}."
+    lines = [f"Session checkpoints: {session.session_id}"]
+    for checkpoint in reversed(session.checkpoints):
+        state = "existing file" if checkpoint.existed else "new file"
+        lines.append(
+            f"- [{checkpoint.checkpoint_id}] {checkpoint.kind}: {checkpoint.file_path} ({state})"
+        )
+    lines.append(f"Total: {len(session.checkpoints)} checkpoint(s)")
     return "\n".join(lines)

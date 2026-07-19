@@ -7,6 +7,7 @@ from typing import Any
 from minicode_lite.tooling import ToolContext, ToolDefinition, ToolResult
 from minicode_lite.tools._shared import (
     build_diff_preview,
+    checkpoint_for_tool,
     ensure_edit_for_tool,
     read_text_file,
     resolve_for_tool,
@@ -77,6 +78,8 @@ def _run(input_data: dict[str, Any], context: ToolContext) -> ToolResult:
     approval_error = ensure_edit_for_tool(context, target, preview)
     if approval_error is not None:
         return approval_error
+    # 精确替换只记录一次原始全文，不为内存中的中间字符串制造伪快照。
+    checkpoint_for_tool(context, target, content)
     result = write_text_file(target, input_data["path"], updated)
     # 共享写入函数可能返回磁盘/权限错误，不能假设更新已经落盘。
     if not result.ok:
