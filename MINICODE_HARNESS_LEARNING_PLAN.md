@@ -911,6 +911,10 @@ minicode-lite/
 - 标签：`stage-16`
 - 推送 GitHub/Gitee。
 
+阶段 16 已建立真实跨模块回归链路：`tests/test_integration.py` 覆盖 prompt -> tool -> final -> session -> replay、write -> checkpoint -> rewind、readiness JSON 和 Windows 反斜杠路径；`release_gate.py` 将 compile、import、pytest、readiness JSON 与离线 headless smoke 汇总为稳定报告和退出码。2026-07-20 的全量测试结果为 `178 passed, 1 skipped`，五项真实发布门禁均通过。
+
+- 学习总结：[`stage-16-integration-and-release-gates.md`](docs/stage-summaries/stage-16-integration-and-release-gates.md)
+
 ## 阶段 17：回顾真实 MiniCode-Python 架构
 
 目标：在自己已经实现一遍后，再系统回看真实项目，补齐理解而不是盲目复制。

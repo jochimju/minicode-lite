@@ -69,3 +69,14 @@ Expected CLI output:
 ```text
 MiniCode Lite ready
 ```
+
+## Release Gate
+
+阶段 16 将编译、导入、全量测试、readiness JSON 和离线 headless smoke 组合成一个发布门禁：
+
+```powershell
+python -m minicode_lite.release_gate
+python -m minicode_lite.release_gate --json
+```
+
+只有所有检查都通过时命令才返回退出码 `0`。门禁会强制使用 mock model，并把 smoke session 写入临时目录，因此不会联网、消费 API 配额或污染真实会话。
