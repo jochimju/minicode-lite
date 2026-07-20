@@ -14,7 +14,8 @@ from minicode_lite.model_registry import create_model_adapter
 from minicode_lite.permissions import PermissionManager
 from minicode_lite.prompt import build_system_prompt
 from minicode_lite.session import create_new_session, save_session
-from minicode_lite.tools import create_default_tool_registry
+from minicode_lite.skills import discover_skills
+from minicode_lite.tools import create_default_tool_registry, create_load_skill_tool
 from minicode_lite.types import ChatMessage
 
 
@@ -43,6 +44,9 @@ def run_headless(prompt: str, *, cwd: str | Path | None = None) -> str:
     workspace = Path.cwd() if cwd is None else Path(cwd)
     # 每个 headless turn 构造干净的默认工具注册表，不携带上次调用的状态。
     tools = create_default_tool_registry()
+    # 技能正文按需加载，因此这里只注册读取入口并提前收集轻量元数据。
+    tools.register(create_load_skill_tool(str(workspace)))
+    available_skills = discover_skills(workspace)
     # headless 没有交互审批界面，因此权限管理器对编辑和非只读命令采用默认拒绝。
     permissions = PermissionManager(workspace)
     # 项目记忆与 workspace 一一绑定；检索只读，不会为没有记忆的项目创建目录。
@@ -71,6 +75,7 @@ def run_headless(prompt: str, *, cwd: str | Path | None = None) -> str:
                 tools=tools,
                 permissions=permissions,
                 memory_context=memory.get_context(user_prompt),
+                skills=available_skills or None,
             ),
         },
         {"role": "user", "content": user_prompt},

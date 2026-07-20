@@ -827,6 +827,12 @@ minicode-lite/
 - 标签：`stage-14`
 - 推送 GitHub/Gitee。
 
+### 完成状态（已完成）
+
+阶段 14 已实现项目、用户和兼容目录的技能发现，使用轻量元数据注入 prompt，并通过 `load_skill` 工具按需读取正文。技能名称和符号链接都受根目录边界约束；同名技能按项目优先级确定。fake MCP 工具可批量、原子地接入 `ToolRegistry`，真实 stdio MCP 按计划后置。2026-07-20 的全量测试结果为 `167 passed, 1 skipped`，跳过项仍是需显式启用的 live Qwen 测试。
+
+- 学习总结：[`stage-14-skills-extension-point.md`](docs/stage-summaries/stage-14-skills-extension-point.md)
+
 ## 阶段 15：轻量 TUI 或交互式 REPL
 
 目标：不追求完整全屏 TUI，先做可用的交互式体验，理解 transcript 和 tool lifecycle。

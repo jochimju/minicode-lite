@@ -70,6 +70,15 @@ class ToolRegistry:
 
         return list(self._tools)
 
+    def register(self, tool: ToolDefinition) -> None:
+        """追加一个扩展工具；同名工具必须显式处理，不能悄悄覆盖已有能力。"""
+
+        # MCP、skills 等后续扩展点都复用这一入口，保证列表和名称索引同步更新。
+        if tool.name in self._tool_index:
+            raise ValueError(f"Tool already registered: {tool.name}")
+        self._tools.append(tool)
+        self._tool_index[tool.name] = tool
+
     def find(self, name: str) -> ToolDefinition | None:
         """按 ToolCall 中的名称查找工具；找不到时显式返回 None。"""
 

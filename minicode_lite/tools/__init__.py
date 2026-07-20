@@ -5,6 +5,7 @@ from __future__ import annotations
 from minicode_lite.tooling import ToolRegistry
 from minicode_lite.tools.edit_file import edit_file_tool
 from minicode_lite.tools.list_files import list_files_tool
+from minicode_lite.tools.load_skill import create_load_skill_tool
 from minicode_lite.tools.patch_file import patch_file_tool
 from minicode_lite.tools.read_file import read_file_tool
 from minicode_lite.tools.run_command import run_command_tool
@@ -30,6 +31,7 @@ def create_default_tool_registry() -> ToolRegistry:
 # 只导出构造函数和各工具定义，隐藏模块内部的校验/执行辅助函数。
 __all__ = [
     "create_default_tool_registry",
+    "create_load_skill_tool",
     "edit_file_tool",
     "list_files_tool",
     "patch_file_tool",

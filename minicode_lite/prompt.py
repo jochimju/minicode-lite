@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from minicode_lite.skills import SkillSummary
 from minicode_lite.tooling import ToolRegistry
 
 
@@ -13,8 +14,9 @@ def build_system_prompt(
     tools: ToolRegistry,
     permissions: Any | None = None,
     memory_context: str | None = None,
+    skills: list[SkillSummary] | None = None,
 ) -> str:
-    """把工作目录、工具、权限和相关项目记忆写入模型可读提示。"""
+    """把工作目录、工具、技能、权限和相关项目记忆写入模型可读提示。"""
 
     # 先写入不会随运行变化的助手身份，确保每次调用都以同一角色开场。
     lines = [
@@ -33,6 +35,13 @@ def build_system_prompt(
     else:
         # 空注册表也写出显式标记，避免模型误以为工具清单意外截断。
         lines.append("- No tools registered.")
+    if skills is not None:
+        # 发现阶段只注入轻量元数据；正文必须通过 load_skill 按需读取，控制 prompt 体积。
+        lines.append("Skills:")
+        if skills:
+            lines.extend(f"- {skill.name}: {skill.description} ({skill.source})" for skill in skills)
+        else:
+            lines.append("- No local skills discovered.")
     if permissions is None:
         # 独立调用 prompt 构建器时保留明确占位，不虚构运行时策略。
         lines.append("Permissions: not configured")
