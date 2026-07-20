@@ -27,6 +27,28 @@ To recreate the environment:
 conda env create -f environment.yml
 ```
 
+## Local Commands
+
+Local commands are handled before runtime configuration or model creation, so inspection commands also work offline:
+
+| Command | Purpose |
+| --- | --- |
+| `/tools` | List tools available to the agent. |
+| `/session [session-id\|latest]` | Inspect the active or latest workspace session. |
+| `/sessions` | List saved sessions for the current workspace. |
+| `/session-replay [session-id\|latest]` | Replay a session transcript. |
+| `/checkpoints [session-id\|latest]` | Show recoverable file checkpoints. |
+| `/rewind-preview [latest\|steps\|checkpoint-id]` | Preview a rewind without changing files. |
+| `/rewind [latest\|steps\|checkpoint-id]` | Restore files and keep a reverse checkpoint. |
+| `/memory` | Show project-memory storage and entry count. |
+
+For example:
+
+```powershell
+python -m minicode_lite /sessions
+python -m minicode_lite /memory
+```
+
 ## Stage 0 Smoke
 
 Expected CLI output:
@@ -34,4 +56,3 @@ Expected CLI output:
 ```text
 MiniCode Lite ready
 ```
-

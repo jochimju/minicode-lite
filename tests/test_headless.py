@@ -156,6 +156,20 @@ def test_run_headless_handles_local_command_before_loading_config_or_model(
     assert "read_file" in response
 
 
+def test_run_headless_memory_command_does_not_load_runtime_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "minicode_lite.headless.load_runtime_config",
+        lambda: pytest.fail("local commands must not load runtime configuration"),
+    )
+
+    response = run_headless("/memory", cwd=tmp_path)
+
+    assert "Project memory:" in response
+    assert "Entries: 0" in response
+
+
 def test_headless_cli_reports_runtime_error_without_traceback(monkeypatch: pytest.MonkeyPatch) -> None:
     def fail_provider(_prompt: str) -> str:
         raise RuntimeError("Bearer stage6-secret-token")

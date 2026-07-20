@@ -705,6 +705,12 @@ minicode-lite/
 - 标签：`stage-11`
 - 推送 GitHub/Gitee。
 
+### 完成状态（已完成）
+
+阶段 11 已实现统一 `cli_commands.py`，支持 `/tools`、`/session`、`/sessions`、`/session-replay`、`/checkpoints`、`/rewind-preview`、`/rewind` 和 `/memory`，并保留阶段 5 的 `/read` 兼容入口。本地命令在 runtime config 和 model adapter 之前执行；session 选择支持 active/latest/显式 ID 且受 workspace 隔离；preview 保持零副作用，rewind 继续保留反向 checkpoint。2026-07-20 的全量测试结果为 `134 passed, 1 skipped`，跳过项仍是需要显式启用的 live Qwen 测试。
+
+- 学习总结：[`stage-11-local-product-commands.md`](docs/stage-summaries/stage-11-local-product-commands.md)
+
 ## 阶段 12：readiness 和可观测性
 
 目标：让运行时能回答“我现在是否准备好工作，哪里还缺东西”。

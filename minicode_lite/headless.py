@@ -8,7 +8,7 @@ from typing import TextIO
 
 from minicode_lite.agent_loop import run_agent_turn
 from minicode_lite.config import load_runtime_config
-from minicode_lite.local_commands import try_handle_local_command
+from minicode_lite.cli_commands import try_handle_local_command
 from minicode_lite.memory import MemoryManager
 from minicode_lite.model_registry import create_model_adapter
 from minicode_lite.permissions import PermissionManager
