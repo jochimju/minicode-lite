@@ -790,6 +790,12 @@ minicode-lite/
 - 标签：`stage-13`
 - 推送 GitHub/Gitee。
 
+### 完成状态（已完成）
+
+阶段 13 已实现轻量 `turn_kernel.py`：用 `TurnRecurrentState` 集中维护步数、phase、空响应重试、工具观察、verification evidence、widening 与停止原因；用 `TurnStepPolicy` 和 `derive_turn_step_policy` 显式表达 `explore -> execute -> verify`；用 `decide_assistant_turn`、`decide_tool_turn` 把策略判断从 `agent_loop.py` 抽离。失败或空工具结果不能支持过早 final，基础预算耗尽且当前结果必须继续时默认只增加 1 步，调用方也可用 `widening_extra_steps=0` 保持严格上限。2026-07-20 的全量测试结果为 `156 passed, 1 skipped`，跳过项仍是需要显式启用的 live Qwen 测试。
+
+- 学习总结：[`stage-13-turn-kernel-policies.md`](docs/stage-summaries/stage-13-turn-kernel-policies.md)
+
 ## 阶段 14：技能和扩展点
 
 目标：理解 MiniCode 如何从固定工具扩展到技能和 MCP，但只做可测试的最小版本。

@@ -82,6 +82,7 @@ def test_agent_turn_logs_max_steps_stop_reason(caplog) -> None:
         messages=[{"role": "user", "content": "continue"}],
         cwd=".",
         max_steps=1,
+        widening_extra_steps=0,
     )
 
     records = [record for record in caplog.records if record.name == "minicode_lite.agent_loop"]

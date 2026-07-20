@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-# 实现最小 agent loop：模型决定下一步，工具产生观察，再回到模型得到最终回答。
+"""执行模型与工具循环，并把每一步的控制决策委托给 turn kernel。"""
 
 from collections.abc import Callable
 from typing import Any
 
 from minicode_lite.logging_config import log_turn_stop
 from minicode_lite.tooling import ToolContext, ToolRegistry, ToolResult
+from minicode_lite.turn_kernel import (
+    TurnRecurrentState,
+    decide_assistant_turn,
+    decide_tool_turn,
+    derive_turn_step_policy,
+)
 from minicode_lite.types import ChatMessage, ModelAdapter, ToolCall
 
 
@@ -17,9 +23,9 @@ EMPTY_RESPONSE_RETRY_MESSAGE = (
 
 
 def _snapshot_messages(messages: list[ChatMessage]) -> list[ChatMessage]:
-    """复制消息列表和每条字典，隔离模型/回调对历史的意外修改。"""
+    """复制消息列表和每条字典，隔离模型或回调对历史的意外修改。"""
 
-    # 浅复制每条消息已经足够，因为当前消息的可变嵌套输入不会在 loop 内改写。
+    # 浅复制已经足够，因为 loop 不会改写消息中的嵌套工具输入。
     return [dict(message) for message in messages]
 
 
@@ -30,25 +36,34 @@ def _append_assistant_message(
 ) -> None:
     """记录最终 assistant 文本，并在需要时通知展示层。"""
 
-    # 最终回答要进入历史，供调用者提取和后续阶段持久化。
     messages.append({"role": "assistant", "content": content})
     if on_assistant_message is not None:
-        # 回调是可选的 UI 钩子，核心 loop 不依赖具体展示界面。
+        # 回调是可选 UI 钩子，核心循环不依赖具体界面。
         on_assistant_message(content)
 
 
+def _append_progress_message(
+    messages: list[ChatMessage],
+    content: str,
+    on_progress_message: Callable[[str], None] | None,
+) -> None:
+    """把非终止性 assistant 信息写入独立进度通道。"""
+
+    if not content:
+        return
+    messages.append({"role": "assistant_progress", "content": content})
+    if on_progress_message is not None:
+        on_progress_message(content)
+
+
 def _append_tool_call_message(messages: list[ChatMessage], call: ToolCall) -> None:
-    """把模型提出的工具调用写入历史，供工具结果和模型后续回答关联。"""
+    """把模型提出的工具意图写入历史，供结果按调用 ID 配对。"""
 
     messages.append(
         {
-            # 此角色代表模型尚未执行但已经声明的工具意图。
             "role": "assistant_tool_call",
-            # 调用本身没有自然语言回答，因此内容保持为空。
             "content": "",
-            # 保留调用 ID，后续 result 使用同一 ID 配对。
             "toolUseId": call["id"],
-            # 保存名称和输入，使整个历史自描述。
             "toolName": call["toolName"],
             "input": call["input"],
         }
@@ -60,22 +75,29 @@ def _append_tool_result_message(
     call: ToolCall,
     result: ToolResult,
 ) -> None:
-    """把一次工具运行结果编码成模型下一次能读取的消息。"""
+    """把工具观察编码成模型下一步能够读取的历史消息。"""
 
     messages.append(
         {
-            # tool_result 是模型观察外部世界、决定下一步行动的依据。
             "role": "tool_result",
-            # 工具输出以文本形式进入上下文。
             "content": result.output,
-            # 用相同 ID 将观察归属到对应调用。
             "toolUseId": call["id"],
-            # 工具名便于 provider/调试器不扫描更早消息也能识别来源。
             "toolName": call["toolName"],
-            # ToolResult 的成功标志在消息中反向表示错误状态。
             "isError": not result.ok,
         }
     )
+
+
+def _widen_if_needed(
+    turn_state: TurnRecurrentState,
+    *,
+    widening_extra_steps: int,
+) -> None:
+    """当当前决策必须继续但预算耗尽时，尝试唯一一次预算扩宽。"""
+
+    if not turn_state.has_remaining_steps():
+        # activate_widening 自带幂等保护，重复到达边界不会无限增加预算。
+        turn_state.activate_widening(extra_steps=widening_extra_steps)
 
 
 def _run_agent_turn_impl(
@@ -85,6 +107,7 @@ def _run_agent_turn_impl(
     messages: list[ChatMessage],
     cwd: str,
     max_steps: int = 8,
+    widening_extra_steps: int = 1,
     permissions: Any | None = None,
     session: Any | None = None,
     runtime: dict[str, Any] | None = None,
@@ -94,101 +117,145 @@ def _run_agent_turn_impl(
     on_assistant_message: Callable[[str], None] | None = None,
     on_progress_message: Callable[[str], None] | None = None,
 ) -> list[ChatMessage]:
-    """执行一轮有限步数的 agent 交互，返回新增内容后的消息历史副本。"""
+    """执行一轮有限 agent 交互，返回包含本轮新增记录的历史副本。"""
 
-    # 调用者传入的历史不可变；本轮所有状态追加到独立工作副本。
+    # 调用者传入的历史保持不变；本轮只修改工作副本。
     working_messages = _snapshot_messages(messages)
-    # 只允许空响应重试一次，防止模型持续空输出造成无意义循环。
-    empty_response_retried = False
+    # recurrent state 是 loop 与 policy 之间唯一的单轮控制状态。
+    turn_state = TurnRecurrentState(max_steps=max_steps)
 
-    for _step_index in range(max_steps):
-        # 每次给模型快照，使适配器无法篡改 loop 的权威消息历史。
-        next_step = model.next(
-            _snapshot_messages(working_messages),
-            store=store,
-        )
+    while turn_state.has_remaining_steps():
+        # 先占用预算再推导策略，让 remaining_steps 表示本次之后还能调用几次模型。
+        step_index = turn_state.begin_step()
+        step_policy = derive_turn_step_policy(turn_state)
+        # 模型只收到历史副本，不能篡改 loop 维护的权威记录。
+        next_step = model.next(_snapshot_messages(working_messages), store=store)
 
         if next_step.type == "assistant":
-            # assistant 步骤可能是进度提示，也可能是真正终止本轮的最终回答。
-            content = next_step.content
-            if next_step.kind == "progress" or next_step.contentKind == "progress":
-                if content:
-                    # 进度信息可见但不终止循环，因此采用独立角色写入历史。
-                    working_messages.append({"role": "assistant_progress", "content": content})
-                    if on_progress_message is not None:
-                        # UI 可选择即时展示进度，而无需理解 AgentStep。
-                        on_progress_message(content)
-                # 无论进度是否为空，都继续请求模型产生下一步。
+            decision = decide_assistant_turn(
+                turn_state=turn_state,
+                step_content=next_step.content,
+                is_progress=(
+                    next_step.kind == "progress" or next_step.contentKind == "progress"
+                ),
+                step_policy=step_policy,
+                empty_response_retry_message=EMPTY_RESPONSE_RETRY_MESSAGE,
+            )
+            if decision.kind == "progress":
+                _append_progress_message(
+                    working_messages,
+                    decision.assistant_content or "",
+                    on_progress_message,
+                )
+                _widen_if_needed(
+                    turn_state,
+                    widening_extra_steps=widening_extra_steps,
+                )
                 continue
 
-            if not content.strip():
-                if empty_response_retried:
-                    # 连续第二次空回答时用明确停止消息收束本轮，避免死循环。
-                    _append_assistant_message(
-                        working_messages,
-                        "Stopped because the model returned an empty response twice.",
-                        on_assistant_message,
+            if decision.kind == "retry":
+                # 重试 nudge 作为用户消息进入上下文，模型才能看见格式纠正要求。
+                working_messages.append(
+                    {"role": "user", "content": decision.user_content or ""}
+                )
+                _widen_if_needed(
+                    turn_state,
+                    widening_extra_steps=widening_extra_steps,
+                )
+                continue
+
+            if decision.kind == "guard":
+                # 守卫说明对用户可见，但不会伪装成最终回答。
+                _append_progress_message(
+                    working_messages,
+                    decision.assistant_content or "",
+                    on_progress_message,
+                )
+                if decision.user_content:
+                    working_messages.append(
+                        {"role": "user", "content": decision.user_content}
                     )
-                    log_turn_stop("empty_response", steps=_step_index + 1)
-                    return working_messages
-                # 首次空回答时插入一条用户提示，给模型一次纠正格式的机会。
-                empty_response_retried = True
-                working_messages.append({"role": "user", "content": EMPTY_RESPONSE_RETRY_MESSAGE})
+                _widen_if_needed(
+                    turn_state,
+                    widening_extra_steps=widening_extra_steps,
+                )
                 continue
 
-            # 非空最终文本完成本轮，写入历史并通知可选展示层。
-            _append_assistant_message(working_messages, content, on_assistant_message)
-            log_turn_stop("assistant_final", steps=_step_index + 1)
+            if decision.kind == "fallback":
+                _append_assistant_message(
+                    working_messages,
+                    decision.assistant_content or "The turn was stopped.",
+                    on_assistant_message,
+                )
+                turn_state.set_stop_reason(decision.stop_reason or "empty_response")
+                log_turn_stop(turn_state.stop_reason, steps=step_index)
+                return working_messages
+
+            # 只有 kernel 判定为 final 的文本才能终止本轮。
+            _append_assistant_message(
+                working_messages,
+                decision.assistant_content or "",
+                on_assistant_message,
+            )
+            turn_state.set_stop_reason(decision.stop_reason or "assistant_final")
+            log_turn_stop(turn_state.stop_reason, steps=step_index)
             return working_messages
 
         if next_step.type == "tool_calls":
-            # 一个模型步骤中的所有调用同属同一轮决策，必须先完整写入意图批次，
-            # 才能让后续 provider 适配器把它们还原为一个 assistant/tool_calls 消息。
+            # 同一模型步骤中的调用先完整记录意图，再按顺序执行结果。
             for call in next_step.calls:
                 _append_tool_call_message(working_messages, call)
 
             for call in next_step.calls:
                 if on_tool_start is not None:
-                    # 工具启动回调支持 CLI/TUI 等产品层展示生命周期。
                     on_tool_start(call["toolName"], call["input"])
-
-                # 注册表负责执行、校验和错误隔离；上下文携带本轮所需环境。
+                # registry 负责参数校验、异常隔离和权限边界。
                 result = tools.execute(
                     call["toolName"],
                     call["input"],
                     ToolContext(
-                        # cwd 是文件工具建立相对路径和安全边界的基准。
                         cwd=cwd,
                         permissions=permissions,
                         session=session,
                         runtime=runtime,
                     ),
                 )
-
                 if on_tool_result is not None:
-                    # 回调接收已格式化输出和错误标记，展示层无需依赖 ToolResult。
                     on_tool_result(call["toolName"], result.output, not result.ok)
-                # 结果写回历史，使下一次 model.next 能根据观察继续推理。
                 _append_tool_result_message(working_messages, call, result)
-            # 一批工具都执行完后仍需回到模型，不能在此处当作最终回答。
+                # kernel 只折叠控制状态，不接管真实工具执行或消息序列化。
+                decide_tool_turn(
+                    turn_state=turn_state,
+                    tool_name=call["toolName"],
+                    result_ok=result.ok,
+                    result_output=result.output,
+                )
+
+            # 工具观察之后必须回到模型验证；边界处可补唯一一次预算。
+            _widen_if_needed(
+                turn_state,
+                widening_extra_steps=widening_extra_steps,
+            )
             continue
 
-        # 理论上类型约束已限制分支；此保护分支让异常适配器输出也能安全停止。
+        # 类型约束之外的适配器输出使用明确失败消息安全收束。
         _append_assistant_message(
             working_messages,
             f"Stopped because the model returned an unsupported step type: {next_step.type}",
             on_assistant_message,
         )
-        log_turn_stop("unsupported_step", steps=_step_index + 1)
+        turn_state.set_stop_reason("unsupported_step")
+        log_turn_stop("unsupported_step", steps=step_index)
         return working_messages
 
-    # 循环耗尽预算仍无最终回答时，显式写入原因，避免静默返回半截历史。
+    # widening 未启用或已消费后仍无 final，使用有效上限报告硬停止原因。
     _append_assistant_message(
         working_messages,
-        f"Stopped after reaching max_steps={max_steps}.",
+        f"Stopped after reaching max_steps={turn_state.max_steps}.",
         on_assistant_message,
     )
-    log_turn_stop("max_steps", steps=max_steps)
+    turn_state.set_stop_reason("max_steps")
+    log_turn_stop("max_steps", steps=turn_state.step)
     return working_messages
 
 
@@ -199,6 +266,7 @@ def run_agent_turn(
     messages: list[ChatMessage],
     cwd: str,
     max_steps: int = 8,
+    widening_extra_steps: int = 1,
     permissions: Any | None = None,
     session: Any | None = None,
     runtime: dict[str, Any] | None = None,
@@ -208,21 +276,22 @@ def run_agent_turn(
     on_assistant_message: Callable[[str], None] | None = None,
     on_progress_message: Callable[[str], None] | None = None,
 ) -> list[ChatMessage]:
-    """建立 turn 级权限生命周期，再执行最小 agent loop。"""
+    """建立 turn 级权限生命周期，再执行受 kernel 管理的 agent loop。"""
 
-    # PermissionManager 是可选扩展；仅在对象提供生命周期方法时调用，兼容测试假对象。
+    # PermissionManager 是可选扩展；仅在对象提供生命周期方法时调用。
     begin_turn = getattr(permissions, "begin_turn", None)
     end_turn = getattr(permissions, "end_turn", None)
     if callable(begin_turn):
         begin_turn()
     try:
-        # 实际消息循环保留在独立函数中，使所有提前返回都能经过 finally 撤销临时授权。
+        # finally 保证模型或回调异常时也不会把临时授权泄漏到下一轮。
         return _run_agent_turn_impl(
             model=model,
             tools=tools,
             messages=messages,
             cwd=cwd,
             max_steps=max_steps,
+            widening_extra_steps=widening_extra_steps,
             permissions=permissions,
             session=session,
             runtime=runtime,
@@ -233,6 +302,5 @@ def run_agent_turn(
             on_progress_message=on_progress_message,
         )
     finally:
-        # 模型异常或工具回调异常时同样清理授权，不能泄漏到下一轮。
         if callable(end_turn):
             end_turn()

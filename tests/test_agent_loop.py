@@ -166,11 +166,71 @@ def test_agent_turn_stops_when_max_steps_is_reached() -> None:
         messages=[{"role": "user", "content": "loop"}],
         cwd=".",
         max_steps=1,
+        widening_extra_steps=0,
     )
 
     assert messages[-1]["role"] == "assistant"
     assert "max_steps=1" in messages[-1]["content"]
     assert model.calls == 1
+
+
+def test_agent_turn_widens_once_to_verify_a_last_step_tool_result() -> None:
+    model = ScriptedModel(
+        [
+            AgentStep(
+                type="tool_calls",
+                calls=[{"id": "call-1", "toolName": "echo", "input": {"text": "hi"}}],
+            ),
+            AgentStep(type="assistant", content="verified after widening"),
+        ]
+    )
+
+    messages = run_agent_turn(
+        model=model,
+        tools=_echo_registry(),
+        messages=[{"role": "user", "content": "use the final base step"}],
+        cwd=".",
+        max_steps=1,
+    )
+
+    assert messages[-1] == {"role": "assistant", "content": "verified after widening"}
+    assert model.calls == 2
+
+
+def test_agent_turn_guards_final_until_successful_tool_evidence_exists() -> None:
+    model = ScriptedModel(
+        [
+            AgentStep(
+                type="tool_calls",
+                calls=[{"id": "call-1", "toolName": "missing", "input": {}}],
+            ),
+            AgentStep(type="assistant", content="done without evidence"),
+            AgentStep(
+                type="tool_calls",
+                calls=[{"id": "call-2", "toolName": "echo", "input": {"text": "checked"}}],
+            ),
+            AgentStep(type="assistant", content="done with evidence"),
+        ]
+    )
+
+    messages = run_agent_turn(
+        model=model,
+        tools=_echo_registry(),
+        messages=[{"role": "user", "content": "verify before final"}],
+        cwd=".",
+        max_steps=4,
+    )
+
+    assert messages[-1] == {"role": "assistant", "content": "done with evidence"}
+    assert any(
+        message["role"] == "assistant_progress"
+        and "Verification guard" in message["content"]
+        for message in messages
+    )
+    assert not any(
+        message["role"] == "assistant" and message["content"] == "done without evidence"
+        for message in messages
+    )
 
 
 def test_agent_turn_emits_lifecycle_callbacks() -> None:
