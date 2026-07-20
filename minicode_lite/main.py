@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TextIO
 
 from minicode_lite.headless import run_headless
+from minicode_lite.repl import run_repl
 
 
 # READY_MESSAGE 让未提供任务时的最小安装验证有稳定可断言的输出。
@@ -27,6 +28,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--version",
         action="store_true",
         help="Print the package version and exit.",
+    )
+    parser.add_argument(
+        "--repl",
+        action="store_true",
+        help="Start the lightweight interactive REPL.",
     )
     # readiness 的机器输出是 CLI 能力而非模型 prompt；显式声明可避免 argparse 提前报 unknown option。
     parser.add_argument(
@@ -74,6 +80,12 @@ def run(
         # 版本查询成功后立即返回，不继续解析或执行 prompt。
         print(__version__, file=output)
         return 0
+
+    if args.repl:
+        if args.prompt or args.json:
+            print("Error: --repl cannot be combined with a prompt or --json", file=error_output)
+            return 1
+        return run_repl(cwd=cwd, output=output)
 
     # 将 argparse 收集的词组恢复成用户输入的一次任务文本。
     # join() 使用一个空格连接所有字符串：

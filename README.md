@@ -51,6 +51,17 @@ python -m minicode_lite /memory
 python -m minicode_lite /readiness --json
 ```
 
+## Interactive REPL
+
+阶段 15 提供不依赖全屏终端的轻量交互入口：
+
+```powershell
+python -m minicode_lite --repl
+```
+
+普通输入进入 agent turn，斜杠命令在本地执行，输入 `/exit` 退出。工具事件按
+`tool:start -> tool:result/tool:error -> assistant` 的顺序显示。
+
 ## Stage 0 Smoke
 
 Expected CLI output:

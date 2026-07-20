@@ -866,6 +866,12 @@ minicode-lite/
 - 标签：`stage-15`
 - 推送 GitHub/Gitee。
 
+### 完成状态（已完成）
+
+阶段 15 已实现同步行模式的轻量 REPL：输入被分类为退出、本地命令或 agent 任务；本地命令继续复用统一命令处理器，普通输入进入持续的 agent/session 状态；工具 start/result/error 和 assistant 按顺序进入可观察 transcript。退出时悬挂的 running 工具会被标记为 error。提供 `python -m minicode_lite --repl` 与 `minicode-lite-repl` 入口，未引入全屏重绘、raw mode 或后台线程。全量测试结果记录在阶段总结中。
+
+- 学习总结：[`stage-15-interactive-repl-surface.md`](docs/stage-summaries/stage-15-interactive-repl-surface.md)
+
 ## 阶段 16：集成测试和发布门禁
 
 目标：把前面分散的能力组合起来，形成真正可回归的 MiniCode Lite harness。

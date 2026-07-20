@@ -16,6 +16,7 @@ dev = ["pytest>=8.0.0"]
 [project.scripts]
 minicode-lite = "minicode_lite.main:main"
 minicode-lite-headless = "minicode_lite.headless:main"
+minicode-lite-repl = "minicode_lite.repl:run_repl"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
