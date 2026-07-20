@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from minicode_lite.logging_config import log_turn_stop
 from minicode_lite.tooling import ToolContext, ToolRegistry, ToolResult
 from minicode_lite.types import ChatMessage, ModelAdapter, ToolCall
 
@@ -128,6 +129,7 @@ def _run_agent_turn_impl(
                         "Stopped because the model returned an empty response twice.",
                         on_assistant_message,
                     )
+                    log_turn_stop("empty_response", steps=_step_index + 1)
                     return working_messages
                 # 首次空回答时插入一条用户提示，给模型一次纠正格式的机会。
                 empty_response_retried = True
@@ -136,6 +138,7 @@ def _run_agent_turn_impl(
 
             # 非空最终文本完成本轮，写入历史并通知可选展示层。
             _append_assistant_message(working_messages, content, on_assistant_message)
+            log_turn_stop("assistant_final", steps=_step_index + 1)
             return working_messages
 
         if next_step.type == "tool_calls":
@@ -176,6 +179,7 @@ def _run_agent_turn_impl(
             f"Stopped because the model returned an unsupported step type: {next_step.type}",
             on_assistant_message,
         )
+        log_turn_stop("unsupported_step", steps=_step_index + 1)
         return working_messages
 
     # 循环耗尽预算仍无最终回答时，显式写入原因，避免静默返回半截历史。
@@ -184,6 +188,7 @@ def _run_agent_turn_impl(
         f"Stopped after reaching max_steps={max_steps}.",
         on_assistant_message,
     )
+    log_turn_stop("max_steps", steps=max_steps)
     return working_messages
 
 

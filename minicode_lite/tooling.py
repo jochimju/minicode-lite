@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Any
+
+from minicode_lite.logging_config import log_tool_execution, monotonic_milliseconds
 
 
 @dataclass(slots=True)
@@ -75,22 +78,33 @@ class ToolRegistry:
     def execute(self, tool_name: str, input_data: Any, context: ToolContext) -> ToolResult:
         """执行一次工具调用，并把预期失败和意外异常都变为 ToolResult。"""
 
+        # 从统一边界计时，未知工具、校验失败和 runner 异常都应留下同形日志。
+        started_at = perf_counter()
         # 先查找，未知工具是模型可恢复的错误，不应中断整个 turn。
         tool = self.find(tool_name)
         if tool is None:
-            return ToolResult(ok=False, output=f"Unknown tool: {tool_name}")
-        try:
-            # 只有通过 validator 的数据才会交给真正有副作用的 runner。
-            parsed = tool.validator(input_data)
-        except (KeyError, TypeError, ValueError) as error:
-            # 输入格式错误同样写成工具结果，让模型能据此修正下一步调用。
-            return ToolResult(ok=False, output=f"Input validation error in {tool_name}: {error}")
-        try:
-            # 具体工具负责自己的业务行为，注册表负责统一的调用边界。
-            return tool.run(parsed, context)
-        except (KeyboardInterrupt, SystemExit):
-            # 用户中断和进程退出必须保持原语义，不能被伪装成普通工具错误。
-            raise
-        except Exception as error:  # noqa: BLE001
-            # 未预期异常不能击穿 agent loop，转换后模型仍可收到失败原因。
-            return ToolResult(ok=False, output=f"Tool {tool_name} crashed: {error}")
+            result = ToolResult(ok=False, output=f"Unknown tool: {tool_name}")
+        else:
+            try:
+                # 只有通过 validator 的数据才会交给真正有副作用的 runner。
+                parsed = tool.validator(input_data)
+            except (KeyError, TypeError, ValueError) as error:
+                # 输入格式错误同样写成工具结果，让模型能据此修正下一步调用。
+                result = ToolResult(ok=False, output=f"Input validation error in {tool_name}: {error}")
+            else:
+                try:
+                    # 具体工具负责自己的业务行为，注册表负责统一的调用边界。
+                    result = tool.run(parsed, context)
+                except (KeyboardInterrupt, SystemExit):
+                    # 用户中断和进程退出必须保持原语义，不能被伪装成普通工具错误。
+                    raise
+                except Exception as error:  # noqa: BLE001
+                    # 未预期异常不能击穿 agent loop，转换后模型仍可收到失败原因。
+                    result = ToolResult(ok=False, output=f"Tool {tool_name} crashed: {error}")
+        # 日志只记录边界元数据；工具参数和输出可能含有用户源码或密钥，不能写入日志。
+        log_tool_execution(
+            tool_name,
+            success=result.ok,
+            duration_ms=monotonic_milliseconds(started_at),
+        )
+        return result

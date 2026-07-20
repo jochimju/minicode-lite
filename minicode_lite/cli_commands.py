@@ -6,6 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from minicode_lite.memory import MemoryManager
+from minicode_lite.readiness import (
+    build_readiness_report,
+    format_readiness_json,
+    format_readiness_text,
+)
 from minicode_lite.session import (
     SessionData,
     SessionMetadata,
@@ -145,6 +150,13 @@ def try_handle_local_command(
     if command == "/tools":
         return "Usage: /tools"
 
+    if command == "/readiness" and argument in {"", "--json"}:
+        # readiness 只读取本地环境和配置，不创建模型，也不发起 provider 请求。
+        report = build_readiness_report(workspace, tools)
+        return format_readiness_json(report) if argument == "--json" else format_readiness_text(report)
+    if command == "/readiness":
+        return "Usage: /readiness [--json]"
+
     if command == "/read":
         if not argument:
             return "Usage: /read <path>"
@@ -215,6 +227,8 @@ def try_handle_local_command(
 
 __all__ = [
     "format_memory_status",
+    "format_readiness_json",
+    "format_readiness_text",
     "format_session_list",
     "format_tools",
     "try_handle_local_command",

@@ -28,6 +28,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the package version and exit.",
     )
+    # readiness 的机器输出是 CLI 能力而非模型 prompt；显式声明可避免 argparse 提前报 unknown option。
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Render the /readiness command as JSON.",
+    )
     # 剩余位置参数组成一次 headless prompt，兼容 `python -m ... hello world`。
     parser.add_argument(
         "prompt",
@@ -72,6 +78,11 @@ def run(
     # 将 argparse 收集的词组恢复成用户输入的一次任务文本。
     # join() 使用一个空格连接所有字符串：
     prompt = " ".join(args.prompt).strip()
+    if args.json:
+        if prompt != "/readiness":
+            print("Error: --json is only valid with /readiness", file=error_output)
+            return 1
+        prompt += " --json"
     if prompt:
         try:
             # 有任务时复用 headless 实现，避免 CLI 和单轮执行逻辑分叉。

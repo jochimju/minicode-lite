@@ -105,6 +105,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     # 使用可变位置参数，让多个命令行词组在稍后重新拼成一个 prompt。
     parser.add_argument("prompt", nargs="*", help="Prompt to send to the mock agent.")
+    # 作为独立选项接收后再还原到本地命令，避免 argparse 把 `/readiness --json` 当成未知参数拒绝。
+    parser.add_argument("--json", action="store_true", help="Render the /readiness command as JSON.")
     return parser
 
 
@@ -122,6 +124,11 @@ def run(argv: list[str] | None = None, stdout: TextIO | None = None, stderr: Tex
     err = sys.stderr if stderr is None else stderr
     # argparse 把位置参数拆成列表；用空格重建用户原本的单条提示。
     prompt = " ".join(args.prompt).strip()
+    if args.json:
+        if prompt != "/readiness":
+            print("Error: --json is only valid with /readiness", file=err)
+            return 1
+        prompt += " --json"
     if not prompt:
         print("Error: empty prompt", file=err)
         return 1

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 
 import pytest
@@ -170,6 +171,21 @@ def test_run_headless_memory_command_does_not_load_runtime_config(
     assert "Entries: 0" in response
 
 
+def test_run_headless_readiness_json_uses_mock_fallback_without_creating_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "minicode_lite.headless.create_model_adapter",
+        lambda *_args: pytest.fail("readiness must not create a model"),
+    )
+
+    payload = json.loads(run_headless("/readiness --json", cwd=tmp_path))
+
+    assert payload["status"] == "warning"
+    assert payload["mode"] == "mock"
+    assert next(check for check in payload["checks"] if check["name"] == "tools")["status"] == "pass"
+
+
 def test_headless_cli_reports_runtime_error_without_traceback(monkeypatch: pytest.MonkeyPatch) -> None:
     def fail_provider(_prompt: str) -> str:
         raise RuntimeError("Bearer stage6-secret-token")
@@ -198,3 +214,27 @@ def test_headless_cli_preserves_value_error_handling(monkeypatch: pytest.MonkeyP
 
     assert exit_code == 1
     assert stderr.getvalue() == "Error: empty prompt\n"
+
+
+def test_headless_cli_routes_readiness_json_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[str] = []
+    monkeypatch.setattr(
+        "minicode_lite.headless.run_headless",
+        lambda prompt: captured.append(prompt) or '{"status": "warning"}',
+    )
+    stdout = io.StringIO()
+
+    exit_code = run(["/readiness", "--json"], stdout=stdout)
+
+    assert exit_code == 0
+    assert captured == ["/readiness --json"]
+    assert json.loads(stdout.getvalue())["status"] == "warning"
+
+
+def test_headless_cli_rejects_json_for_other_prompts() -> None:
+    stderr = io.StringIO()
+
+    exit_code = run(["hello", "--json"], stderr=stderr)
+
+    assert exit_code == 1
+    assert stderr.getvalue() == "Error: --json is only valid with /readiness\n"

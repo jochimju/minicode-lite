@@ -34,6 +34,7 @@ Local commands are handled before runtime configuration or model creation, so in
 | Command | Purpose |
 | --- | --- |
 | `/tools` | List tools available to the agent. |
+| `/readiness [--json]` | Check Python, workspace, tools, and model fallback readiness. |
 | `/session [session-id\|latest]` | Inspect the active or latest workspace session. |
 | `/sessions` | List saved sessions for the current workspace. |
 | `/session-replay [session-id\|latest]` | Replay a session transcript. |
@@ -47,6 +48,7 @@ For example:
 ```powershell
 python -m minicode_lite /sessions
 python -m minicode_lite /memory
+python -m minicode_lite /readiness --json
 ```
 
 ## Stage 0 Smoke

@@ -747,6 +747,10 @@ minicode-lite/
 - 标签：`stage-12`
 - 推送 GitHub/Gitee。
 
+阶段 12 已实现 `readiness.py` 和最小 `logging_config.py`：`/readiness` 与 `/readiness --json` 会在模型创建前只读检查 Python、cwd、默认工具和 Qwen/mock 模型路径，使用 `ready`、`warning`、`blocked` 三级状态并输出版本化 JSON；`ToolRegistry.execute` 统一记录工具名、成功状态和耗时，agent loop 记录 final、空响应、异常 step 与 max steps 的停止原因，且日志不包含工具输入输出或凭据。2026-07-20 的全量测试结果为 `147 passed, 1 skipped`，跳过项仍是需要显式启用的 live Qwen 测试。
+
+- 学习总结：[`stage-12-readiness-and-observability.md`](docs/stage-summaries/stage-12-readiness-and-observability.md)
+
 ## 阶段 13：turn kernel 的 phase、widening、verification
 
 目标：把最小 loop 拆成更容易推理和测试的 turn policy，理解真实 MiniCode 的 harness 控制点。

@@ -98,3 +98,21 @@ def test_cli_preserves_value_error_handling(monkeypatch: pytest.MonkeyPatch) -> 
 
     assert exit_code == 1
     assert stderr.getvalue() == "Error: empty prompt\n"
+
+
+def test_main_cli_routes_readiness_json_flag(tmp_path: Path) -> None:
+    stdout = io.StringIO()
+
+    exit_code = run(["/readiness", "--json"], stdout=stdout, cwd=tmp_path)
+
+    assert exit_code == 0
+    assert '"schema_version": "1.0"' in stdout.getvalue()
+
+
+def test_main_cli_rejects_json_for_other_prompts() -> None:
+    stderr = io.StringIO()
+
+    exit_code = run(["hello", "--json"], stderr=stderr)
+
+    assert exit_code == 1
+    assert stderr.getvalue() == "Error: --json is only valid with /readiness\n"
