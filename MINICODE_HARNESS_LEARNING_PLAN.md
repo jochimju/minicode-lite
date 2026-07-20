@@ -957,6 +957,10 @@ minicode-lite/
 - 标签：`stage-17`
 - 推送 GitHub/Gitee。
 
+阶段 17 已完成架构回顾：新增 `ARCHITECTURE_NOTES.md`，对照真实项目记录核心路径、产品面、高级优化层和暂不复制的复杂度；新增文档契约测试，且已用离线 headless 与 session replay 验证本项目自身的运行证据。
+
+- 学习总结：[`stage-17-architecture-review.md`](docs/stage-summaries/stage-17-architecture-review.md)
+
 ## 阶段完成定义
 
 一个阶段只有同时满足以下条件，才算完成：
