@@ -9,6 +9,7 @@ from typing import TextIO
 from minicode_lite.agent_loop import run_agent_turn
 from minicode_lite.config import load_runtime_config
 from minicode_lite.local_commands import try_handle_local_command
+from minicode_lite.memory import MemoryManager
 from minicode_lite.model_registry import create_model_adapter
 from minicode_lite.permissions import PermissionManager
 from minicode_lite.prompt import build_system_prompt
@@ -44,6 +45,8 @@ def run_headless(prompt: str, *, cwd: str | Path | None = None) -> str:
     tools = create_default_tool_registry()
     # headless 没有交互审批界面，因此权限管理器对编辑和非只读命令采用默认拒绝。
     permissions = PermissionManager(workspace)
+    # 项目记忆与 workspace 一一绑定；检索只读，不会为没有记忆的项目创建目录。
+    memory = MemoryManager(workspace)
 
     # `/tools`、`/read` 等本地命令无需消耗模型调用，优先直接分流处理。
     local_result = try_handle_local_command(
@@ -67,6 +70,7 @@ def run_headless(prompt: str, *, cwd: str | Path | None = None) -> str:
                 cwd=str(workspace),
                 tools=tools,
                 permissions=permissions,
+                memory_context=memory.get_context(user_prompt),
             ),
         },
         {"role": "user", "content": user_prompt},

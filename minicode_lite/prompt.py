@@ -12,8 +12,9 @@ def build_system_prompt(
     cwd: str,
     tools: ToolRegistry,
     permissions: Any | None = None,
+    memory_context: str | None = None,
 ) -> str:
-    """把工作目录、已注册工具和暂未实现的运行时能力写入模型可读提示。"""
+    """把工作目录、工具、权限和相关项目记忆写入模型可读提示。"""
 
     # 先写入不会随运行变化的助手身份，确保每次调用都以同一角色开场。
     lines = [
@@ -39,7 +40,12 @@ def build_system_prompt(
         # 权限管理器只暴露非敏感摘要，不把 prompt handler 或临时授权状态写给模型。
         lines.append("Permissions:")
         lines.extend(f"- {item}" for item in permissions.get_summary())
-    # memory 仍属于后续阶段，继续显式标明尚未配置。
-    lines.append("Memory: not configured")
+    if memory_context is None:
+        # 独立构建 prompt 且未提供 memory 管理器时，保留明确的未配置状态。
+        lines.append("Memory: not configured")
+    else:
+        # 已配置但没有命中与完全未配置是两种状态，模型和后续 readiness 都应能区分。
+        lines.append("Memory:")
+        lines.append(memory_context or "- No relevant project memories.")
     # 使用固定换行符连接各段，使相同输入始终生成相同的提示文本。
     return "\n".join(lines)

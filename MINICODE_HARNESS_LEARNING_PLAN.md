@@ -663,6 +663,12 @@ minicode-lite/
 - 标签：`stage-10`
 - 推送 GitHub/Gitee。
 
+### 完成状态（已完成）
+
+阶段 10 已实现项目级 `MemoryEntry`、`MemoryManager`、原子 JSON 持久化、中英文关键词检索和 headless prompt 注入。memory 与 workspace 绑定，非字符串内容会稳定转换，空内容会被拒绝，损坏文件会安全降级为空记忆。2026-07-20 的全量测试结果为 `121 passed, 1 skipped`，跳过项仍是需要显式启用的 live Qwen 测试。
+
+- 学习总结：[`stage-10-minimal-project-memory.md`](docs/stage-summaries/stage-10-minimal-project-memory.md)
+
 ## 阶段 11：本地产品命令
 
 目标：把内部能力包装成用户能操作的本地命令。

@@ -58,3 +58,24 @@ def test_build_system_prompt_includes_configured_permission_summary() -> None:
 
     assert "Permissions:\n- workspace: D:/workspace/demo\n- edits require approval" in prompt
     assert "Permissions: not configured" not in prompt
+
+
+def test_build_system_prompt_injects_memory_context() -> None:
+    prompt = build_system_prompt(
+        cwd="D:/workspace/demo",
+        tools=ToolRegistry([]),
+        memory_context="- 文件编辑前必须创建 checkpoint。",
+    )
+
+    assert "Memory:\n- 文件编辑前必须创建 checkpoint。" in prompt
+    assert "Memory: not configured" not in prompt
+
+
+def test_build_system_prompt_marks_configured_memory_without_matches() -> None:
+    prompt = build_system_prompt(
+        cwd="D:/workspace/demo",
+        tools=ToolRegistry([]),
+        memory_context="",
+    )
+
+    assert "Memory:\n- No relevant project memories." in prompt

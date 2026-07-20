@@ -9,6 +9,7 @@ from minicode_lite import session as session_module
 from minicode_lite.config import RuntimeConfig
 from minicode_lite.headless import run, run_headless
 from minicode_lite.mock_model import ScriptedModel
+from minicode_lite.memory import MemoryManager
 from minicode_lite.permissions import PermissionManager
 from minicode_lite.prompt import build_system_prompt
 from minicode_lite.types import AgentStep
@@ -69,11 +70,29 @@ def test_run_headless_passes_system_prompt_before_user_prompt(
                         cwd=str(tmp_path),
                         tools=captured["tools"],
                         permissions=PermissionManager(tmp_path),
+                        memory_context=MemoryManager(tmp_path).get_context("explain the workspace"),
                     ),
             },
             {"role": "user", "content": "explain the workspace"},
         ]
     ]
+
+
+def test_run_headless_injects_relevant_project_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    MemoryManager(tmp_path).add("文件编辑前必须创建 checkpoint。", tags=["安全"])
+    model = ScriptedModel([AgentStep(type="assistant", content="memory used")])
+    monkeypatch.setattr(
+        "minicode_lite.headless.create_model_adapter",
+        lambda _config, _tools: (model, "test"),
+    )
+
+    result = run_headless("修改文件时要遵守什么 checkpoint 规则？", cwd=tmp_path)
+
+    assert result == "memory used"
+    system_prompt = model.received_messages[0][0]["content"]
+    assert "Memory:\n- 文件编辑前必须创建 checkpoint。" in system_prompt
 
 
 def test_run_headless_persists_messages_and_transcript(
